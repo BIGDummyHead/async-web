@@ -49,6 +49,10 @@ where
         }
     }
 
+    pub fn worker_count(&self) -> usize {
+        self.size
+    }
+
     pub fn get_queue(&self) -> Arc<Queue<Pin<Box<dyn Future<Output = R> + Send + 'static>>>> {
         self.work.clone()
     }
@@ -78,7 +82,6 @@ where
 
     pub async fn add_work(&self, work: Pin<Box<dyn Future<Output = R> + Send + 'static>>) -> () {
         self.work.queue(work).await
-
     }
 
 

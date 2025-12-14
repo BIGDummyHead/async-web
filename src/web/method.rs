@@ -1,4 +1,5 @@
 #[derive(Debug)]
+#[derive(Eq, Hash, PartialEq)]
 pub enum Method {
     GET,
     POST,
