@@ -1,45 +1,61 @@
-use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddrV4},
-    sync::Arc,
-    time::Duration,
-    vec,
-};
+use std::net::{Ipv4Addr, SocketAddrV4};
 
-use futures::join;
-use std::fs;
-use std::future::Future;
-use std::pin::Pin;
-use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::{TcpListener, TcpStream},
-    time::sleep,
-};
-
-use crate::web::{App, Queue, Request, WorkManager, app};
+use crate::web::{App, Method, Resolution, resolution::FileResolution};
 
 pub mod web;
 
-#[tokio::main]
-async fn main() {
+async fn add_routes(app: &mut App) -> () {
+    let _ = app.get_router().await.add_route(
+        "/tasks",
+        Some((
+            Method::GET,
+            Box::new(|req| {
+                Box::pin(async move {
+                    println!("{}", req.route);
+                    Box::new(FileResolution {
+                        file: "tasks.html".to_string(),
+                    }) as Box<dyn Resolution + Send>
+                })
+            }),
+        )),
+    );
 
+    let _ = app
+        .get_router()
+        .await
+        .get_route("/")
+        .unwrap()
+        .insert_resolution(
+            Method::GET,
+            Box::new(|req| {
+                Box::pin(async move {
+                    println!("{}", req.route);
+                    Box::new(FileResolution {
+                        file: "home.html".to_string(),
+                    }) as Box<dyn Resolution + Send>
+                })
+            }),
+        );
+}
+
+async fn create_local_app() -> App {
     let addr = Ipv4Addr::new(127, 0, 0, 1);
     let port = 8080;
 
     let app_bind = App::bind(100, SocketAddrV4::new(addr, port)).await;
 
     if let Err(e) = app_bind {
-        eprintln!("Could not bind app! {e}");
-        return;
+        panic!("Could not bind app! {e}");
     }
 
-    let app = app_bind.unwrap();
-
-    let handle = app.start_listening().await;
-
-    let join_result = handle.await;
-
-    if let Err(e) = join_result {
-        eprintln!("Error joining the thread: {e}");
-    }
+    app_bind.unwrap()
 }
 
+#[tokio::main]
+async fn main() {
+    let mut app = create_local_app().await;
+
+    add_routes(&mut app).await;
+
+    let _ = app.start().await.await;
+}

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pure JavaScript App</title>
+
+  <!-- External CSS Library -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex items-center justify-center">
+
+  <div class="bg-gray-800 p-6 rounded-xl w-full max-w-md shadow-lg">
+    <h1 class="text-xl font-semibold mb-4">Task Manager (Pure JS)</h1>
+
+    <div class="flex gap-2 mb-4">
+      <input id="taskInput" type="text" placeholder="New task..."
+        class="flex-1 px-3 py-2 rounded bg-gray-700 text-sm focus:outline-none" />
+      <button id="addBtn" class="px-4 py-2 bg-blue-600 rounded text-sm">Add</button>
+    </div>
+
+    <ul id="taskList" class="space-y-2"></ul>
+
+    <div class="mt-4 text-sm text-gray-400">
+      Total tasks: <span id="count">0</span>
+    </div>
+  </div>
+
+  <script>
+    const input = document.getElementById('taskInput');
+    const addBtn = document.getElementById('addBtn');
+    const list = document.getElementById('taskList');
+    const count = document.getElementById('count');
+
+    let tasks = [];
+
+    function render() {
+      list.innerHTML = '';
+      tasks.forEach((task, index) => {
+        const li = document.createElement('li');
+        li.className = 'flex items-center justify-between bg-gray-700 px-3 py-2 rounded';
+
+        const span = document.createElement('span');
+        span.textContent = task;
+
+        const btn = document.createElement('button');
+        btn.textContent = '✕';
+        btn.className = 'text-red-400 text-sm';
+        btn.onclick = () => {
+          tasks.splice(index, 1);
+          render();
+        };
+
+        li.appendChild(span);
+        li.appendChild(btn);
+        list.appendChild(li);
+      });
+
+      count.textContent = tasks.length;
+    }
+
+    addBtn.addEventListener('click', () => {
+      const value = input.value.trim();
+      if (!value) return;
+      tasks.push(value);
+      input.value = '';
+      render();
+    });
+
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') addBtn.click();
+    });
+  </script>
+
+</body>
+</html>
