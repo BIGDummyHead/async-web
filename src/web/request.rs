@@ -7,16 +7,22 @@ use tokio::{
 
 use crate::web::{Method, Route};
 
+/// Represents a web request.
 pub struct Request {
+    /// The method used for this request.
     pub method: Method,
+    /// The route of the request 
     pub route: Route,
+    /// Any other header.
     pub headers: HashMap<String, String>,
 }
 
 impl Request {
+
+    /// Parse a tcp stream request and gives back the Request
     pub async fn parse_request(stream: &mut TcpStream) -> Result<Self, std::io::Error> {
         //create a buffer that will read each line
-        let (reader, write_half) = stream.split();
+        let (reader, _) = stream.split();
         let buf_reader = BufReader::new(reader);
         let mut lines = buf_reader.lines();
 

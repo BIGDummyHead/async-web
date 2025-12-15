@@ -7,9 +7,9 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::web::Queue;
+use crate::web::{Queue, errors::{WorkerError, worker_error::WorkerErrorType}};
 
-///Takes a work Queue and works based on the queue, slowly consuming it.
+/// Represents an individual worker that is able to complete some form of 'work' and return it back to a manager.
 pub struct Worker<R>
 where
     R: Send + 'static,
@@ -24,6 +24,7 @@ impl<R> Worker<R>
 where
     R: Send + 'static,
 {
+    /// Create a new worker with a sender and some work queue
     pub fn new(
         sender: Sender<R>,
         work: Arc<Queue<Pin<Box<dyn Future<Output = R> + 'static + Send>>>>,
@@ -36,9 +37,12 @@ where
         }
     }
 
-    pub async fn start_worker(&mut self) -> () {
+    /// Starts the worker
+    /// 
+    /// Returns a worker error if the worker has already started before.
+    pub async fn start_worker(&mut self) -> Result<(), WorkerError> {
         if let Some(_) = &self.task {
-            return;
+            return Err(WorkerError::new(WorkerErrorType::AlreadyRunning))
         }
 
         let work = self.work.clone();
@@ -59,6 +63,8 @@ where
         });
 
         self.task = Some(task);
+
+        Ok(())
     }
 
     pub async fn close(&mut self) -> () {

@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
+/// A route from a request
 #[derive(Debug)]
 pub struct Route {
+    /// The full route given
     pub init_route: String,
+    /// Any params within the route/
     params: HashMap<String, String>,
 }
 

@@ -1,5 +1,6 @@
 use std::fs;
 
+/// Represents a resolution for a request
 pub trait Resolution {
     ///
     /// Get all headers for the HTTP response.

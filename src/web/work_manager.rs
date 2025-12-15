@@ -5,20 +5,26 @@ use tokio::{
     sync::{
         Mutex,
         mpsc::{self, Receiver, Sender},
-    },
-    task::{self, JoinHandle},
+    }
 };
 
 use crate::web::{Queue, Worker};
 
+
+/// Represents a distrubutor of work.
 pub struct WorkManager<R>
 where
     R: Send + 'static,
 {
+    /// The amount of workers started on creation.
     size: usize,
+    /// The sender to clone for the receiver
     sender: Sender<R>,
+    ///The receiver, used to get incoming data from workers.
     pub receiver: Arc<Mutex<Receiver<R>>>,
+    /// Vec of created workers 
     workers: Vec<Worker<R>>,
+    /// Work to complete. Async work that returns the R type given
     work: Arc<Queue<Pin<Box<dyn Future<Output = R> + Send + 'static>>>>,
 }
 
@@ -26,6 +32,10 @@ impl<R> WorkManager<R>
 where
     R: Send + 'static,
 {
+    /// Create a new set of n workers to complete work for this R set of functions. 
+    /// 
+    /// An optional buffer may be passed in for the mpsc::channel. This buffer controls the amount of messages the sender must receive before it is flushed
+    /// This count is automatically set to 0 if "None" is passed in.
     pub async fn new(size: usize, opt_buffer: Option<usize>) -> Self {
         let buffer = match opt_buffer {
             None => 1,
@@ -49,10 +59,12 @@ where
         }
     }
 
+    /// The amount of workers created
     pub fn worker_count(&self) -> usize {
         self.size
     }
 
+    /// Get the queue of work being used by the workers.
     pub fn get_queue(&self) -> Arc<Queue<Pin<Box<dyn Future<Output = R> + Send + 'static>>>> {
         self.work.clone()
     }
@@ -63,7 +75,8 @@ where
         work: &Arc<Queue<Pin<Box<dyn Future<Output = R> + Send + 'static>>>>,
     ) -> Vec<Worker<R>> {
         
-        let mut created_workers: Vec<Worker<R>> = vec![];
+        let mut work_futs= vec![];
+
         for _ in 0..size {
             let tx = sender.clone();
 
@@ -71,20 +84,25 @@ where
 
             let mut worker = Worker::new(tx, wrk);
 
-            worker.start_worker().await;
-
-            created_workers.push(worker);
+            //push an async closure that starts the worker then returns it... these are awaited later.
+            work_futs.push(async move {
+                //we can ignore this value.
+                let _ = worker.start_worker().await;
+                return worker;
+            });
         }
 
-        return created_workers;
+
+        join_all(work_futs).await
     }
 
-
+    /// Add work to the queue for workers to complete.
     pub async fn add_work(&self, work: Pin<Box<dyn Future<Output = R> + Send + 'static>>) -> () {
         self.work.queue(work).await
     }
 
 
+    /// Close all workers, the queue, and wait for them to finish
     pub async fn close_and_finish_work(&mut self) -> () {
 
         let mut close_futs = vec![];
@@ -94,7 +112,6 @@ where
             close_futs.push(close_fut);
         }
 
-        println!("Waiting for {} to close", close_futs.len());
         join_all(close_futs).await;
     }
 

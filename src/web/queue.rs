@@ -9,12 +9,15 @@ pub struct Queue<R> {
     pub deque_lock: Notify
 }
 
+/// Async based Queue
 impl<R> Queue<R> {
 
+    /// Create a new queue
     pub fn new() -> Self {
         Self { work: Mutex::new(Vec::new()), deque_lock: Notify::new() }
     }
 
+    /// Queue a value
     pub async fn queue(&self, value: R) -> () {
         let mut work = self.work.lock().await;
 
@@ -32,6 +35,9 @@ impl<R> Queue<R> {
         Some(locked_queue.remove(0))
     }
 
+    /// Deque and wait for a value.
+    /// 
+    /// Returns None if there was a closure
     pub async fn deque(&self, closure: Option<Arc<Mutex<bool>>>) -> Option<R> {
 
         let fut = self.deque_lock.notified();

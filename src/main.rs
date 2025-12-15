@@ -1,63 +1,75 @@
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::{
+    net::{Ipv4Addr, SocketAddrV4},
+    sync::Arc,
+    time::Duration,
+};
 
-use crate::web::{App, Method, Resolution, resolution::FileResolution};
+use tokio::time::sleep;
+
+use crate::web::{App, Method, Resolution, resolution::FileResolution, route_tree::RouteNode};
 
 pub mod web;
 
 async fn add_routes(app: &mut App) -> () {
-    let _ = app.get_router().await.add_route(
-        "/tasks/user",
-        Some((
-            Method::GET,
-            Box::new(|req| {
-                Box::pin(async move {
-                    println!("{}", req.route);
-                    Box::new(FileResolution {
-                        file: "tasks.html".to_string(),
-                    }) as Box<dyn Resolution + Send>
-                })
-            }),
-        )),
-    );
+    app.add_or_panic(
+        "/tasks/users",
+        Method::GET,
+        Arc::new(|req| {
+            Box::pin(async move {
+                println!("X: {}", req.route);
+                Box::new(FileResolution {
+                    file: "tasks.html".to_string(),
+                }) as Box<dyn Resolution + Send>
+            })
+        }),
+    )
+    .await;
 
-    let _ = app.get_router().await.add_route(
+    app.add_or_panic(
         "/tasks",
-        Some((
-            Method::GET,
-            Box::new(|req| {
-                Box::pin(async move {
-                    println!("{}", req.route);
-                    Box::new(FileResolution {
-                        file: "tasks.html".to_string(),
-                    }) as Box<dyn Resolution + Send>
-                })
-            }),
-        )),
-    );
+        Method::GET,
+        Arc::new(|req| {
+            Box::pin(async move {
+                println!("X: {}", req.route);
+                Box::new(FileResolution {
+                    file: "tasks.html".to_string(),
+                }) as Box<dyn Resolution + Send>
+            })
+        }),
+    )
+    .await;
 
     let _ = app
-        .get_router()
-        .await
-        .get_route("/")
-        .unwrap()
-        .insert_resolution(
+        .add_or_change_route(
+            "/",
             Method::GET,
-            Box::new(|req| {
+            Arc::new(|req| {
                 Box::pin(async move {
                     println!("{}", req.route);
+                    sleep(Duration::from_secs(2)).await;
                     Box::new(FileResolution {
                         file: "home.html".to_string(),
                     }) as Box<dyn Resolution + Send>
                 })
             }),
-        );
+        )
+        .await;
+
+    app.get_router().await.add_missing_route(Arc::new(|req| {
+        Box::pin(async move {
+            println!("{}", req.route);
+            Box::new(FileResolution {
+                file: "404.html".to_string(),
+            }) as Box<dyn Resolution + Send>
+        })
+    }));
 }
 
 async fn create_local_app() -> App {
     let addr = Ipv4Addr::new(127, 0, 0, 1);
     let port = 8080;
 
-    let app_bind = App::bind(100, SocketAddrV4::new(addr, port)).await;
+    let app_bind = App::bind(3, SocketAddrV4::new(addr, port)).await;
 
     if let Err(e) = app_bind {
         panic!("Could not bind app! {e}");
