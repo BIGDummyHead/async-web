@@ -6,9 +6,8 @@ pub type ResolutionFunc = Box<
     dyn Fn(Request) -> Pin<Box<dyn Future<Output = Box<dyn Resolution + Send + 'static>> + Send>>
         + Send
         + Sync
-        + 'static
+        + 'static,
 >;
-
 
 pub struct RouteNode {
     // part of the route, /admin/api (api or admin) would be the id
@@ -86,7 +85,6 @@ impl RouteTree {
         route: &str,
         resolution: Option<(Method, ResolutionFunc)>,
     ) -> Result<(), ()> {
-
         let full_route = route.to_string();
 
         let mut route_parts = full_route.split("/").peekable();
@@ -102,11 +100,18 @@ impl RouteTree {
 
             //there is a child on this node and it is the last add it
             if node.children.contains_key(&route_part.to_string()) {
-                let child = node.get_child_as_mut(route_part.to_string()).unwrap();
+                //insert the resolution since it exists
                 if is_last {
-                    child.add_child(route_part.to_string(), resolution);
+                    if let Some((m, r)) = resolution {
+                        node.get_child_as_mut(route_part.to_string())
+                            .unwrap()
+                            .insert_resolution(m, r);
+                    }
                     return Ok(());
                 }
+
+                // ! must come second to avoid overuse of borrow
+                let child = node.get_child_as_mut(route_part.to_string()).unwrap();
                 node = child;
             } else {
                 //there is no child, we must now add it to the current node

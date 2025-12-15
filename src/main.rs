@@ -6,6 +6,21 @@ pub mod web;
 
 async fn add_routes(app: &mut App) -> () {
     let _ = app.get_router().await.add_route(
+        "/tasks/user",
+        Some((
+            Method::GET,
+            Box::new(|req| {
+                Box::pin(async move {
+                    println!("{}", req.route);
+                    Box::new(FileResolution {
+                        file: "tasks.html".to_string(),
+                    }) as Box<dyn Resolution + Send>
+                })
+            }),
+        )),
+    );
+
+    let _ = app.get_router().await.add_route(
         "/tasks",
         Some((
             Method::GET,
