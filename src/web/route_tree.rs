@@ -17,17 +17,22 @@ pub type ResolutionFunc = Arc<
 pub struct RouteNode {
     // The ID of the node, usually part of a larger string. Ex. api/admin/users -> ID's may be (api, admin, users)
     id: String,
+
     /// A map of resolutions, used to find the function to call for a request. Only one func may exist per Method for THIS node.
     resolutions: HashMap<Method, ResolutionFunc>,
+
     /// Is Variable
-    // TODO: Implement is_var
     is_var: bool,
+
     /// The children of this node.
     ///
     /// Assume that the node is part of a tree for ["api/admin/users", "api/partner/users", "api/agency/users"] and this node is "api"
     ///
     /// The children of this node would be ["admin", "partner", "agency"]
     children: HashMap<String, RouteNode>,
+
+    /// The variable based child for this route node.
+    var_child: Option<Box<RouteNode>>,
 }
 
 /// A node from a Route Tree
@@ -46,6 +51,7 @@ impl RouteNode {
             resolutions,
             is_var,
             children: HashMap::new(),
+            var_child: None,
         }
     }
 
@@ -75,15 +81,31 @@ impl RouteNode {
         id: String,
         resolution: Option<(Method, ResolutionFunc)>,
     ) -> &mut RouteNode {
+        if id.starts_with("{") && id.ends_with("}") {
+
+            Self::add_var_child(self, id, resolution);
+            println!("Adding variable");
+
+            match &mut self.var_child {
+                None => panic!("Failed to add the variable child for this route node."),
+                Some(var_child) => {
+                    return var_child;
+                }
+            }
+        }
+
         let node = Self::new(id.clone(), resolution);
 
         self.children.insert(id.clone(), node);
 
-        if let Some(n) = self.children.get_mut(&id) {
-            return n;
-        }
+        self.children.get_mut(&id).unwrap()
+    }
 
-        panic!("The value did not exist after insertion.");
+    /// Add a variable based child to your parent node
+    fn add_var_child(&mut self, id: String, resolution: Option<(Method, ResolutionFunc)>) -> () {
+        let node = Self::new(id, resolution);
+
+        self.var_child = Some(Box::new(node));
     }
 }
 
@@ -98,7 +120,6 @@ pub struct RouteTree {
 
 /// Routing Tree that holds information about resolutions for all your routes.
 impl RouteTree {
-
     /// Create a new route tree with a resolution. Usually a GET
     pub fn new(base_resolution: Option<(Method, ResolutionFunc)>) -> Self {
         let root = RouteNode::new("/".to_string(), base_resolution);
@@ -111,7 +132,6 @@ impl RouteTree {
 
     /// Add a 404 resolution
     pub fn add_missing_route(&mut self, resolution: ResolutionFunc) -> () {
-
         let m_node = RouteNode::new("\\_missing_/".to_string(), Some((Method::GET, resolution)));
 
         self.missing_route = Some(m_node);
@@ -220,6 +240,7 @@ impl RouteTree {
         let route_parts = full_route.split("/");
 
         for route_part in route_parts {
+
             if current_node.is_none() {
                 return None;
             }
@@ -228,12 +249,20 @@ impl RouteTree {
                 continue;
             }
 
-            //safe to move and unwrap from previous is_none() check.
             let node = current_node.unwrap();
+            //safe to move and unwrap from previous is_none() check.
+            let child = if node.children.contains_key(&route_part.to_string()) {
+                node.get_child_as_mut(route_part.to_string()).unwrap()
+            } else {
 
-            let child = node.get_child_as_mut(route_part.to_string());
+                if node.var_child.is_none() {
+                    return None;
+                }
 
-            current_node = child;
+                node.var_child.as_mut().unwrap()
+            };
+
+            current_node = Some(child);
         }
 
         return current_node;
@@ -241,6 +270,7 @@ impl RouteTree {
 
     /// Borrow an existing route.
     pub fn get_route(&self, full_route: &str) -> Option<&RouteNode> {
+        
         //start with the root and work our way down
         let mut current_node = Some(&self.root);
 
@@ -253,6 +283,7 @@ impl RouteTree {
         let route_parts = full_route.split("/");
 
         for route_part in route_parts {
+
             if current_node.is_none() {
                 return None;
             }
@@ -264,7 +295,20 @@ impl RouteTree {
             //safe to move and unwrap from previous is_none() check.
             let node = current_node.unwrap();
 
-            let child = node.get_child(route_part.to_string());
+            let find_route_str = route_part.to_string();
+
+            let mut child = node.get_child(find_route_str);
+
+            if let None = child {
+                match &node.var_child {
+                    Some(x) => {
+                        child = Some(x)
+                    }
+                    None => {
+                        return None;
+                    }
+                }
+            }
 
             current_node = child;
         }

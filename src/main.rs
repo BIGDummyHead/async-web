@@ -6,27 +6,13 @@ use std::{
 
 use tokio::time::sleep;
 
-use crate::web::{App, Method, Resolution, resolution::FileResolution, route_tree::RouteNode};
+use crate::web::{App, Method, Resolution, resolution::FileResolution};
 
 pub mod web;
 
 async fn add_routes(app: &mut App) -> () {
     app.add_or_panic(
-        "/tasks/users",
-        Method::GET,
-        Arc::new(|req| {
-            Box::pin(async move {
-                println!("X: {}", req.route);
-                Box::new(FileResolution {
-                    file: "tasks.html".to_string(),
-                }) as Box<dyn Resolution + Send>
-            })
-        }),
-    )
-    .await;
-
-    app.add_or_panic(
-        "/tasks",
+        "/tasks/{users}",
         Method::GET,
         Arc::new(|req| {
             Box::pin(async move {
