@@ -7,5 +7,22 @@ pub enum Method {
     POST,
     PUT, 
     DELETE,
+    PATCH,
     Other(String)
+}
+
+impl std::fmt::Display for Method {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+
+        let m = match self {
+            Self::GET => "GET",
+            Self::POST => "POST",
+            Self::PUT => "PUT",
+            Self::DELETE => "DELETE",
+            Self::PATCH => "PATCH",
+            Self::Other(x) => &format!("Other({x})"),
+        };
+
+        write!(f, "{m}")
+    }
 }

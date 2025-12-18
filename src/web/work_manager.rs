@@ -19,7 +19,7 @@ where
     /// The amount of workers started on creation.
     size: usize,
     /// The sender to clone for the receiver
-    sender: Sender<R>,
+    pub sender: Sender<R>,
     ///The receiver, used to get incoming data from workers.
     pub receiver: Arc<Mutex<Receiver<R>>>,
     /// Vec of created workers 

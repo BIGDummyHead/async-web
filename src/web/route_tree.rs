@@ -1,38 +1,42 @@
-use core::panic;
-use std::{collections::HashMap, pin::Pin, sync::Arc};
+use std::{ collections::HashMap, pin::Pin, sync::Arc};
+
+use futures::lock::Mutex;
 
 use crate::web::{
     Method, Request, Resolution,
     errors::{RoutingError, routing_error::RoutingErrorType},
 };
 
+pub type ResolutionFuture = dyn Future<Output = Box<dyn Resolution + Send + 'static>> + Send;
+
+pub type RequestFunction = dyn Fn(Request) -> Pin<Box<ResolutionFuture>> + Send + Sync + 'static;
+
 /// Describes an async function that takes in a request and gives back the Resolution trait.
-pub type ResolutionFunc = Arc<
-    dyn Fn(Request) -> Pin<Box<dyn Future<Output = Box<dyn Resolution + Send + 'static>> + Send>>
-        + Send
-        + Sync
-        + 'static,
->;
+pub type ResolutionFunc = Arc<RequestFunction>;
+
+pub type RouteNodeRef = Arc<Mutex<RouteNode>>;
 
 pub struct RouteNode {
     // The ID of the node, usually part of a larger string. Ex. api/admin/users -> ID's may be (api, admin, users)
-    id: String,
+    pub id: String,
 
     /// A map of resolutions, used to find the function to call for a request. Only one func may exist per Method for THIS node.
     resolutions: HashMap<Method, ResolutionFunc>,
 
     /// Is Variable
-    is_var: bool,
+    pub is_var: bool,
 
     /// The children of this node.
     ///
     /// Assume that the node is part of a tree for ["api/admin/users", "api/partner/users", "api/agency/users"] and this node is "api"
     ///
     /// The children of this node would be ["admin", "partner", "agency"]
-    children: HashMap<String, RouteNode>,
+    children: HashMap<String, RouteNodeRef>,
 
     /// The variable based child for this route node.
-    var_child: Option<Box<RouteNode>>,
+    var_child: Option<RouteNodeRef>,
+
+    pub parent: Option<RouteNodeRef>,
 }
 
 /// A node from a Route Tree
@@ -45,13 +49,14 @@ impl RouteNode {
             resolutions.insert(m, r);
         }
 
-        let is_var = id.starts_with("{") && id.starts_with("}");
+        let is_var = id.starts_with("{") && id.ends_with("}");
         Self {
             id,
             resolutions,
             is_var,
             children: HashMap::new(),
             var_child: None,
+            parent: None,
         }
     }
 
@@ -61,13 +66,8 @@ impl RouteNode {
     }
 
     /// Borrow a child of the node. None if not present.
-    pub fn get_child(&self, id: String) -> Option<&RouteNode> {
-        self.children.get(&id)
-    }
-
-    /// Borrow a mutable child of the node. None if not present.
-    pub fn get_child_as_mut(&mut self, id: String) -> Option<&mut RouteNode> {
-        self.children.get_mut(&id)
+    pub fn get_child(&self, id: &str) -> Option<RouteNodeRef> {
+        self.children.get(id).cloned()
     }
 
     /// Insert a resolution for the node. Replaces the current resolution for the method if it already exist.
@@ -76,43 +76,34 @@ impl RouteNode {
     }
 
     /// Add a child to this node. Same as using the new function but directly adds to this node.
-    pub fn add_child(
-        &mut self,
+    pub async fn add_child(
+        parent_ref: RouteNodeRef,
         id: String,
         resolution: Option<(Method, ResolutionFunc)>,
-    ) -> &mut RouteNode {
+    ) -> RouteNodeRef {
+        let mut parent = parent_ref.lock().await;
+
+        let mut node = Self::new(id.clone(), resolution);
+        node.parent = Some(parent_ref.clone());
+
+        let node_ref = Arc::new(Mutex::new(node));
+
         if id.starts_with("{") && id.ends_with("}") {
-
-            Self::add_var_child(self, id, resolution);
-            println!("Adding variable");
-
-            match &mut self.var_child {
-                None => panic!("Failed to add the variable child for this route node."),
-                Some(var_child) => {
-                    return var_child;
-                }
-            }
+            parent.var_child = Some(node_ref.clone());
+        } else {
+            parent.children.insert(id.clone(), node_ref.clone());
         }
 
-        let node = Self::new(id.clone(), resolution);
-
-        self.children.insert(id.clone(), node);
-
-        self.children.get_mut(&id).unwrap()
+        return node_ref;
     }
 
-    /// Add a variable based child to your parent node
-    fn add_var_child(&mut self, id: String, resolution: Option<(Method, ResolutionFunc)>) -> () {
-        let node = Self::new(id, resolution);
-
-        self.var_child = Some(Box::new(node));
-    }
 }
+    
 
 ///Binary type tree that takes in parts of a route and ends up at a final function.
 pub struct RouteTree {
     /// Route node for /
-    pub root: RouteNode,
+    pub root: RouteNodeRef,
 
     ///404 node
     pub missing_route: Option<RouteNode>,
@@ -125,7 +116,7 @@ impl RouteTree {
         let root = RouteNode::new("/".to_string(), base_resolution);
 
         Self {
-            root,
+            root: Arc::new(Mutex::new(root)),
             missing_route: None,
         }
     }
@@ -161,7 +152,7 @@ impl RouteTree {
     ///);
     ///);
     /// ```
-    pub fn add_route(
+    pub async fn add_route(
         &mut self,
         route: &str,
         resolution: Option<(Method, ResolutionFunc)>,
@@ -172,9 +163,11 @@ impl RouteTree {
             )));
         }
 
+        let root = self.root.clone();
+
         if route == "/" {
             if let Some((m, r)) = resolution {
-                self.root.insert_resolution(m, r);
+                root.lock().await.insert_resolution(m, r);
                 return Ok(());
             }
 
@@ -186,7 +179,7 @@ impl RouteTree {
         //break the route into digestable parts (nodes)
         let mut route_parts = full_route.split("/").peekable();
 
-        let mut node = &mut self.root;
+        let mut node = root;
 
         while let Some(rte) = route_parts.next() {
             if rte.is_empty() {
@@ -198,81 +191,45 @@ impl RouteTree {
             let is_last = route_parts.peek().is_none();
 
             //there is a child on this node and it is the last add it
-            if node.children.contains_key(&route_part) {
+            if node.lock().await.children.contains_key(&route_part) {
+                let node_clone = node.clone();
+                let brw_node = node_clone.lock().await;
+
                 //insert the resolution since it exists
                 if is_last {
                     if let Some((m, r)) = resolution {
-                        node.get_child_as_mut(route_part)
+                        brw_node
+                            .get_child(&route_part)
                             .unwrap()
+                            .lock()
+                            .await
                             .insert_resolution(m, r);
                     }
                     return Ok(());
                 }
 
-                // ! must come second to avoid overuse of borrow
-                let child = node.get_child_as_mut(route_part).unwrap();
-                node = child;
+                let child = brw_node.get_child(&route_part).unwrap();
+                node = child.clone();
             } else {
                 //there is no child, we must now add it to the current node
                 if is_last {
-                    node.add_child(route_part, resolution);
+                    RouteNode::add_child(node.clone(), route_part, resolution).await;
                     return Ok(());
                 }
 
-                node = node.add_child(route_part, None);
+                let added = RouteNode::add_child(node.clone(), route_part, None).await;
+
+                node = added;
             }
         }
 
         Ok(())
     }
 
-    /// Borrow an existing mutable route.
-    pub fn get_mut_route(&mut self, full_route: &str) -> Option<&mut RouteNode> {
-        //start with the root and work our way down
-        let mut current_node = Some(&mut self.root);
-
-        //they just want the base, save time
-        if full_route == "/" {
-            return current_node;
-        }
-
-        //split into node ids
-        let route_parts = full_route.split("/");
-
-        for route_part in route_parts {
-
-            if current_node.is_none() {
-                return None;
-            }
-
-            if route_part.is_empty() {
-                continue;
-            }
-
-            let node = current_node.unwrap();
-            //safe to move and unwrap from previous is_none() check.
-            let child = if node.children.contains_key(&route_part.to_string()) {
-                node.get_child_as_mut(route_part.to_string()).unwrap()
-            } else {
-
-                if node.var_child.is_none() {
-                    return None;
-                }
-
-                node.var_child.as_mut().unwrap()
-            };
-
-            current_node = Some(child);
-        }
-
-        return current_node;
-    }
-
     /// Borrow an existing route.
-    pub fn get_route(&self, full_route: &str) -> Option<&RouteNode> {
-        
+    pub async fn get_route(&self, full_route: &str) -> Option<RouteNodeRef> {
         //start with the root and work our way down
-        let mut current_node = Some(&self.root);
+        let mut current_node = Some(self.root.clone());
 
         //they just want the base, save time
         if full_route == "/" {
@@ -283,7 +240,6 @@ impl RouteTree {
         let route_parts = full_route.split("/");
 
         for route_part in route_parts {
-
             if current_node.is_none() {
                 return None;
             }
@@ -295,15 +251,13 @@ impl RouteTree {
             //safe to move and unwrap from previous is_none() check.
             let node = current_node.unwrap();
 
-            let find_route_str = route_part.to_string();
+            let brw_node = node.lock().await;
 
-            let mut child = node.get_child(find_route_str);
+            let mut child = brw_node.get_child(route_part);
 
             if let None = child {
-                match &node.var_child {
-                    Some(x) => {
-                        child = Some(x)
-                    }
+                match &brw_node.var_child {
+                    Some(x) => child = Some(x.clone()),
                     None => {
                         return None;
                     }

@@ -10,7 +10,7 @@ use tokio::{
 use crate::web::{
     Method, Request, RouteTree, WorkManager,
     errors::{RoutingError, routing_error::RoutingErrorType},
-    route_tree::ResolutionFunc,
+    route_tree::{ResolutionFunc, RouteNodeRef},
 };
 
 pub struct App {
@@ -72,6 +72,45 @@ impl App {
         Ok(request)
     }
 
+    async fn set_request_variables(req: &mut Request, route_ref: RouteNodeRef) -> () {
+
+
+        let route_parts = req.route.init_route.split('/').rev().filter(|s| {
+            !s.is_empty()
+        });
+
+        let mut current_node = Some(route_ref);
+
+        // the value given here is from the route, so it is the value the user provided
+        for value in route_parts {
+
+            // we are done searching here
+            let node_ref = match current_node {
+                Some(n) => n,
+                None => break
+            };
+
+            let node = node_ref.lock().await;
+
+
+            if node.is_var {
+                let mut id = node.id.clone();
+                id.remove(0);
+                id.remove(id.len() - 1);
+
+                req.variables.insert(id, value.to_string());
+            }
+
+            let next_node = node.parent.clone();
+
+            current_node = next_node;
+            
+        }
+
+        
+
+    }
+
     /// Starts the app, returns a handle referencing the app's task.
     pub async fn start(&self) -> JoinHandle<()> {
         let listener = self.listener.clone();
@@ -102,16 +141,24 @@ impl App {
                         }
 
                         //the web request
-                        let request = req_result.unwrap();
+                        let mut request = req_result.unwrap();
 
                         //get the function to handle the resolution, backs up to a 404 if existant
                         let resolution_handler = {
                             let mut binding = router_ref.lock().await;
 
-                            let route = binding.get_mut_route(&request.route.init_route);
+                            let route = binding.get_route(&request.route.init_route).await;
 
                             match route {
-                                Some(r) => r.get_resolution(&request.method).cloned(),
+                                Some(r) => {
+
+                                    Self::set_request_variables(&mut request, r.clone()).await;
+
+
+                                    let lock_route: futures::lock::MutexGuard<'_, super::route_tree::RouteNode> = r.lock().await;
+
+                                    lock_route.get_resolution(&request.method).cloned()
+                                }
                                 None => {
                                     if let Some(mr) = &mut binding.missing_route {
                                         mr.get_resolution(&Method::GET).cloned()
@@ -140,7 +187,7 @@ impl App {
         let content = resolved.get_content();
         let c_length = content.len();
 
-        full_response.push_str(&format!("Content-Length: {c_length}\r\n"));
+        full_response.push_str(&format!("\r\nContent-Length: {c_length}\r\n"));
         full_response.push_str("\r\n");
         full_response.push_str(&content);
 
@@ -161,7 +208,7 @@ impl App {
         resolution: ResolutionFunc,
     ) -> Result<(), RoutingError> {
         let mut router = self.router.lock().await;
-        router.add_route(route, Some((method, resolution)))
+        router.add_route(route, Some((method, resolution))).await
     }
 
     /// Add route to the router.
@@ -174,17 +221,19 @@ impl App {
         resolution: ResolutionFunc,
     ) -> Result<(), RoutingError> {
         let mut router = self.router.lock().await;
-        let pos_route = router.get_route(route);
+
+        let pos_route = router.get_route(route).await;
 
         if let Some(r) = pos_route {
-            if r.get_resolution(&method).is_some() {
+            if r.lock().await.get_resolution(&method).is_some() {
                 return Err(RoutingError::new(RoutingErrorType::Exist));
             }
         }
 
+
         let route_res = Some((method, resolution));
 
-        router.add_route(route, route_res)
+        router.add_route(route, route_res).await
     }
 
     /// Adds the route to the router or panics if the exact route and method exist!

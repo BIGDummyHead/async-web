@@ -1,4 +1,3 @@
-use std::fmt::write;
 use std::error::Error;
 
 #[derive(Debug)]

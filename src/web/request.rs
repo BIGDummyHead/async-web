@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    net::{TcpStream, tcp::WriteHalf},
+    net::{TcpStream},
 };
 
 use crate::web::{Method, Route};
@@ -15,6 +15,17 @@ pub struct Request {
     pub route: Route,
     /// Any other header.
     pub headers: HashMap<String, String>,
+
+    /// Variable path items. 
+    /// 
+    /// ### Example
+    /// 
+    /// You add the route "/tasks/{userId}/delete"
+    /// 
+    /// > The user fetches "/tasks/1/delete"
+    /// 
+    /// You may now retrieve from the table "userId" and get the value "1"
+    pub variables: HashMap<String, String>
 }
 
 impl Request {
@@ -57,8 +68,9 @@ impl Request {
                 let method = match v {
                     "GET" => Method::GET,
                     "PUT" => Method::PUT,
-                    "PUSH" => Method::POST,
+                    "POST" => Method::POST,
                     "DELETE" => Method::DELETE,
+                    "PATCH" => Method::PATCH,
                     v => Method::Other(String::from(v)),
                 };
 
@@ -101,6 +113,7 @@ impl Request {
             method,
             route,
             headers,
+            variables: HashMap::new()
         })
     }
 }
