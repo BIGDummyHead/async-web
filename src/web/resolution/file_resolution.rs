@@ -1,7 +1,9 @@
 use std::{
-    fs::{self},
     path::{Path, absolute},
+    pin::Pin,
 };
+
+use tokio::fs;
 
 use crate::web::resolution::get_status_header;
 
@@ -14,9 +16,8 @@ pub struct FileResolution<'a> {
 }
 
 impl<'a> FileResolution<'a> {
-
     /// Create a new file resolution with status codes based on if the provided file exist.
-    /// 
+    ///
     /// You can pass none into file_path which results in a 404 error.
     pub fn new(file_path: Option<&'a str>) -> Box<dyn super::Resolution + Send + 'a> {
         let mut path: Option<Box<&'a Path>> = None;
@@ -45,31 +46,32 @@ impl<'a> FileResolution<'a> {
 }
 
 impl<'a> Resolution for FileResolution<'a> {
-    fn get_headers(&self) -> Vec<String> {
-        vec![get_status_header(self.status_code)]
+    fn get_headers(&self) -> Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>> {
+        Box::pin(async move { vec![get_status_header(self.status_code)] })
     }
 
-    fn get_content(&self) -> String {
+    fn get_content(&self) -> Pin<Box<dyn Future<Output = String> + Send + '_>> {
+        Box::pin(async move {
+            //No content to serve.
+            if self.file.is_none() {
+                return "".to_string();
+            }
 
-        //No content to serve.
-        if self.file.is_none() {
-            return "".to_string();
-        }
+            let path = self.file.as_ref().unwrap();
 
-        let path = self.file.as_ref().unwrap();
+            let absolute_path = absolute(**path);
 
-        let absolute_path = absolute(**path);
+            //
+            if let Err(_) = absolute_path {
+                todo!()
+            }
 
-        //
-        if let Err(_) = absolute_path {
-            todo!()
-        }
+            let read_result = fs::read_to_string(&absolute_path.unwrap()).await;
+            if let Ok(s) = read_result {
+                return s;
+            }
 
-        let read_result = fs::read_to_string(&absolute_path.unwrap());
-        if let Ok(s) = read_result {
-            return s;
-        }
-
-        todo!();
+            todo!();
+        })
     }
 }

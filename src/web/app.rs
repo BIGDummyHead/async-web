@@ -183,8 +183,8 @@ impl App {
         // get the resolution if any
         let resolved = resolution(request).await;
 
-        let mut full_response = resolved.get_headers().join("\r\n");
-        let content = resolved.get_content();
+        let mut full_response = resolved.get_headers().await.join("\r\n");
+        let content = resolved.get_content().await;
         let c_length = content.len();
 
         full_response.push_str(&format!("\r\nContent-Length: {c_length}\r\n"));

@@ -1,3 +1,5 @@
+use std::pin::Pin;
+
 pub mod file_resolution;
 pub mod json_resolution;
 
@@ -6,11 +8,11 @@ pub trait Resolution {
     ///
     /// Get all headers for the HTTP response.
     ///
-    fn get_headers(&self) -> Vec<String>;
+    fn get_headers(&self) -> Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>>;
 
     ///
     /// Get the content for the resolution. Gets pushed into the headers. Then a length is used.
-    fn get_content(&self) -> String;
+    fn get_content(&self) ->  Pin<Box<dyn Future<Output = String> + Send + '_>>;
 
 }
 
