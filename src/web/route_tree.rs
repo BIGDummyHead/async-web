@@ -1,20 +1,23 @@
-use std::{ collections::HashMap, pin::Pin, sync::Arc};
+use std::{collections::HashMap, pin::Pin, sync::Arc};
 
-use futures::lock::Mutex;
+
+use tokio::sync::Mutex;
 
 use crate::web::{
     Method, Request, Resolution,
     errors::{RoutingError, routing_error::RoutingErrorType},
+    middleware::MiddlewareCollection,
 };
 
 pub type ResolutionFuture = dyn Future<Output = Box<dyn Resolution + Send + 'static>> + Send;
 
-pub type RequestFunction = dyn Fn(Request) -> Pin<Box<ResolutionFuture>> + Send + Sync + 'static;
+pub type RequestFunction = dyn Fn(Arc<Mutex<Request>>) -> Pin<Box<ResolutionFuture>> + Send + Sync + 'static;
 
 /// Describes an async function that takes in a request and gives back the Resolution trait.
 pub type ResolutionFunc = Arc<RequestFunction>;
 
 pub type RouteNodeRef = Arc<Mutex<RouteNode>>;
+
 
 pub struct RouteNode {
     // The ID of the node, usually part of a larger string. Ex. api/admin/users -> ID's may be (api, admin, users)
@@ -37,6 +40,8 @@ pub struct RouteNode {
     var_child: Option<RouteNodeRef>,
 
     pub parent: Option<RouteNodeRef>,
+
+    pub middleware: Option<MiddlewareCollection>,
 }
 
 /// A node from a Route Tree
@@ -57,6 +62,7 @@ impl RouteNode {
             children: HashMap::new(),
             var_child: None,
             parent: None,
+            middleware: None,
         }
     }
 
@@ -79,12 +85,14 @@ impl RouteNode {
     pub async fn add_child(
         parent_ref: RouteNodeRef,
         id: String,
+        middleware: Option<MiddlewareCollection>,
         resolution: Option<(Method, ResolutionFunc)>,
     ) -> RouteNodeRef {
         let mut parent = parent_ref.lock().await;
 
         let mut node = Self::new(id.clone(), resolution);
         node.parent = Some(parent_ref.clone());
+        node.middleware = middleware;
 
         let node_ref = Arc::new(Mutex::new(node));
 
@@ -96,9 +104,7 @@ impl RouteNode {
 
         return node_ref;
     }
-
 }
-    
 
 ///Binary type tree that takes in parts of a route and ends up at a final function.
 pub struct RouteTree {
@@ -155,6 +161,7 @@ impl RouteTree {
     pub async fn add_route(
         &mut self,
         route: &str,
+        middleware: Option<MiddlewareCollection>,
         resolution: Option<(Method, ResolutionFunc)>,
     ) -> Result<(), RoutingError> {
         if route.is_empty() {
@@ -213,11 +220,11 @@ impl RouteTree {
             } else {
                 //there is no child, we must now add it to the current node
                 if is_last {
-                    RouteNode::add_child(node.clone(), route_part, resolution).await;
+                    RouteNode::add_child(node.clone(), route_part, middleware, resolution).await;
                     return Ok(());
                 }
 
-                let added = RouteNode::add_child(node.clone(), route_part, None).await;
+                let added = RouteNode::add_child(node.clone(), route_part, None, None).await;
 
                 node = added;
             }

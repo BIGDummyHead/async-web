@@ -1,13 +1,12 @@
 use std::{
-    net::{Ipv4Addr, SocketAddrV4},
-    sync::Arc
+    net::{Ipv4Addr, SocketAddrV4}, pin::Pin, sync::Arc
 };
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 
 use crate::web::{
-    App, Method,
-    resolution::{file_resolution::FileResolution, json_resolution::JsonResolution},
+    App, Method, Middleware, Request, middleware::MiddlewareClosure, resolution::{file_resolution::FileResolution, json_resolution::JsonResolution}
 };
 
 pub mod web;
@@ -19,9 +18,29 @@ pub struct Person {
 }
 
 async fn add_routes(app: &mut App) -> () {
+
+    let admin: MiddlewareClosure = Arc::new(|req: Arc<Mutex< Request>>| Box::pin(async move { 
+
+        req.lock().await.variables.insert("admin".to_string(), "yes".to_string());
+        Middleware::Next
+    
+    }));
+    
+    let is_admin: MiddlewareClosure = Arc::new(|req: Arc<Mutex< Request>>| Box::pin(async move { 
+
+        let req_lock = req.lock().await;
+
+        if req_lock.variables.get("is_admin").is_none() {
+            return Middleware::InvalidEmpty(403);
+        }
+        Middleware::Next
+    
+    }));
+
     app.add_or_panic(
         "/tasks",
         Method::GET,
+        Some(vec![admin, is_admin]),
         Arc::new(|_| Box::pin(async move { FileResolution::new(Some("tasks.html")) })),
     )
     .await;
@@ -29,14 +48,20 @@ async fn add_routes(app: &mut App) -> () {
     app.add_or_panic(
         "/json/{name}",
         Method::POST,
+        None,
         Arc::new(|req| {
             Box::pin(async move {
                 let mut people = vec![];
 
-                let name = req.variables.get("name").unwrap();
+                let req_lock = req.lock().await;
+
+                let name = req_lock.variables.get("name").unwrap();
 
                 for age in 0..100 {
-                    people.push(Person { age, name: name.to_string() });
+                    people.push(Person {
+                        age,
+                        name: name.to_string(),
+                    });
                 }
 
                 let serialize = JsonResolution::new(people);
@@ -57,6 +82,7 @@ async fn add_routes(app: &mut App) -> () {
         .add_or_change_route(
             "/",
             Method::GET,
+            None,
             Arc::new(|_| Box::pin(async move { FileResolution::new(Some("home.html")) })),
         )
         .await;
@@ -67,7 +93,6 @@ async fn add_routes(app: &mut App) -> () {
 }
 
 async fn create_local_app() -> App {
-    
     //local app settings.
     let addr = Ipv4Addr::new(127, 0, 0, 1);
     let port = 8080;

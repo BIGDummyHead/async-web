@@ -2,6 +2,7 @@ use std::pin::Pin;
 
 pub mod file_resolution;
 pub mod json_resolution;
+pub mod empty_resolution;
 
 /// Represents a resolution for a request
 pub trait Resolution {
