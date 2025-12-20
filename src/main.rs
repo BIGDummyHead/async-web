@@ -1,12 +1,15 @@
 use std::{
-    net::{Ipv4Addr, SocketAddrV4}, pin::Pin, sync::Arc
+    net::{Ipv4Addr, SocketAddrV4},
+    sync::Arc,
 };
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::web::{
-    App, Method, Middleware, Request, middleware::MiddlewareClosure, resolution::{file_resolution::FileResolution, json_resolution::JsonResolution}
+    App, EndPoint, Method, Middleware, Request,
+    middleware::MiddlewareClosure,
+    resolution::{file_resolution::FileResolution, json_resolution::JsonResolution},
 };
 
 pub mod web;
@@ -18,24 +21,26 @@ pub struct Person {
 }
 
 async fn add_routes(app: &mut App) -> () {
+    let admin: MiddlewareClosure = Arc::new(|req: Arc<Mutex<Request>>| {
+        Box::pin(async move {
+            req.lock()
+                .await
+                .variables
+                .insert("is_admin".to_string(), "yes".to_string());
+            Middleware::Next
+        })
+    });
 
-    let admin: MiddlewareClosure = Arc::new(|req: Arc<Mutex< Request>>| Box::pin(async move { 
+    let is_admin: MiddlewareClosure = Arc::new(|req: Arc<Mutex<Request>>| {
+        Box::pin(async move {
+            let req_lock = req.lock().await;
 
-        req.lock().await.variables.insert("admin".to_string(), "yes".to_string());
-        Middleware::Next
-    
-    }));
-    
-    let is_admin: MiddlewareClosure = Arc::new(|req: Arc<Mutex< Request>>| Box::pin(async move { 
-
-        let req_lock = req.lock().await;
-
-        if req_lock.variables.get("is_admin").is_none() {
-            return Middleware::InvalidEmpty(403);
-        }
-        Middleware::Next
-    
-    }));
+            if req_lock.variables.get("is_admin").is_none() {
+                return Middleware::InvalidEmpty(403);
+            }
+            Middleware::Next
+        })
+    });
 
     app.add_or_panic(
         "/tasks",
@@ -87,9 +92,10 @@ async fn add_routes(app: &mut App) -> () {
         )
         .await;
 
-    app.get_router().await.add_missing_route(Arc::new(|_| {
-        Box::pin(async move { FileResolution::new(Some("404.html")) })
-    }));
+    app.get_router().await.add_missing_route(EndPoint::new(
+        Arc::new(|_| Box::pin(async move { FileResolution::new(Some("404.html")) })),
+        None,
+    ));
 }
 
 async fn create_local_app() -> App {

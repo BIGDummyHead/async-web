@@ -8,11 +8,11 @@ use tokio::{
 };
 
 use crate::web::{
-    Method, Middleware, Request, Resolution, RouteTree, WorkManager,
+    EndPoint, Method, Middleware, Request, Resolution, WorkManager,
     errors::{RoutingError, routing_error::RoutingErrorType},
     middleware::MiddlewareCollection,
     resolution::empty_resolution::EmptyResolution,
-    route_tree::{ResolutionFunc, RouteNodeRef},
+    router::{ResolutionFunc, RouteNodeRef, RouteTree},
 };
 
 pub struct App {
@@ -140,26 +140,6 @@ impl App {
         })
     }
 
-    async fn get_middleware(
-        node_ref: RouteNodeRef,
-        request: Arc<Mutex<Request>>,
-    ) -> Option<Vec<std::pin::Pin<Box<dyn Future<Output = Middleware> + Send>>>> {
-        let node = node_ref.lock().await;
-
-        match &node.middleware {
-            None => None,
-            Some(middleware) => {
-                let mut m_futs = vec![];
-
-                for m in middleware {
-                    m_futs.push(m(request.clone()));
-                }
-
-                Some(m_futs)
-            }
-        }
-    }
-
     /// Work to be completed by a worker, takes the stream to write a resolution and the route tree to use.
     async fn request_work(mut stream: TcpStream, router_ref: Arc<Mutex<RouteTree>>) -> () {
         //process the acception and get the result from the stream
@@ -184,8 +164,8 @@ impl App {
             )
         };
 
-        let resolution_handler = {
-            let mut binding = router_ref.lock().await;
+        let endpoint_opt = {
+            let binding = router_ref.lock().await;
 
             let route = binding.get_route(&init_route).await;
 
@@ -194,64 +174,61 @@ impl App {
                     // This no longer deadlocks because the lock was dropped above
                     Self::set_request_variables(request.clone(), r.clone()).await;
 
-                    // Collect the middleware
-                    let middleware = Self::get_middleware(r.clone(), request.clone()).await;
-
-                    let lock_route = r.lock().await;
-                    let resolution = lock_route.get_resolution(&method).cloned();
-
-                    Some((middleware, resolution))
+                    let route_lock = r.lock().await;
+                    route_lock.get_resolution(&method).clone()
                 }
-                None => {
-                    if let Some(mr) = &mut binding.missing_route {
-                        // Defaulting to GET for 404 handlers is standard
-                        Some((None, mr.get_resolution(&Method::GET).cloned()))
-                    } else {
-                        None
-                    }
-                }
+                None => binding
+                    .missing_route
+                    .as_ref()
+                    .and_then(|mr| mr.get_resolution(&Method::GET))
+                    .clone(),
             }
         };
 
-        if let Some((middleware, resolution_opt)) = resolution_handler {
-            let m_failed_res = match middleware {
-                None => None,
-                Some(middleware) => {
-                    let mut final_middleware = None;
+        if endpoint_opt.as_ref().is_none() {
+            return;
+        }
 
-                    for m in middleware {
-                        let m_result = match m.await {
-                            Middleware::Invalid(res) => Some(res),
-                            Middleware::InvalidEmpty(status_code) => {
-                                Some(EmptyResolution::new(status_code))
-                            }
-                            Middleware::Next => None,
-                        };
+        let endpoint = endpoint_opt.unwrap();
 
-                        if m_result.is_none() {
-                            continue;
+        let middleware_failed_resolution = match &endpoint.middleware {
+            None => None,
+            Some(middleware) => {
+                let mut final_middleware = None;
+
+                for m in middleware {
+                    let m_result = match m(request.clone()).await {
+                        Middleware::Invalid(res) => Some(res),
+                        Middleware::InvalidEmpty(status_code) => {
+                            Some(EmptyResolution::new(status_code))
                         }
+                        Middleware::Next => None,
+                    };
 
-                        final_middleware = Some(m_result.unwrap());
-                        break;
+                    if m_result.is_none() {
+                        continue;
                     }
 
-                    final_middleware
+                    final_middleware = Some(m_result.unwrap());
+                    break;
                 }
-            };
 
-            let write_resolution = if let Some(failed_middleware) = m_failed_res {
-                Some(failed_middleware)
-            } else if let Some(resolution) = resolution_opt {
-                Some(resolution(request.clone()).await)
-            } else {
-                None
-            };
-
-            if let Some(resolved) = write_resolution {
-                Self::resolve(resolved, &mut stream).await;
+                final_middleware
             }
+        };
+
+        let write_resolution = if let Some(failed_middleware) = middleware_failed_resolution {
+            Some(failed_middleware)
+        } else {
+            Some((endpoint.resolution)(request.clone()).await)
+        };
+
+
+        if write_resolution.as_ref().is_none() {
+            return;
         }
+
+        Self::resolve(write_resolution.unwrap(), &mut stream).await;
     }
 
     /// Calls and consumes the resolution, passing the request, then writes to the stream
@@ -283,10 +260,10 @@ impl App {
         middleware: Option<MiddlewareCollection>,
         resolution: ResolutionFunc,
     ) -> Result<(), RoutingError> {
+        let endpoint = EndPoint::new(resolution, middleware);
+
         let mut router = self.router.lock().await;
-        router
-            .add_route(route, middleware, Some((method, resolution)))
-            .await
+        router.add_route(route, Some((method, endpoint))).await
     }
 
     /// Add route to the router.
@@ -309,9 +286,10 @@ impl App {
             }
         }
 
-        let route_res = Some((method, resolution));
+        let endpoint = EndPoint::new(resolution, middleware);
+        let route_res = Some((method, endpoint));
 
-        router.add_route(route, middleware, route_res).await
+        router.add_route(route, route_res).await
     }
 
     /// Adds the route to the router or panics if the exact route and method exist!
