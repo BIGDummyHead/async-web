@@ -85,7 +85,7 @@ impl Request {
                     "The header for the request was missing the route.",
                 ));
             }
-            Some(v) => Route::new(String::from(v)),
+            Some(route) => Route::parse_route(String::from(route)),
         };
 
         //all other headers beside the first

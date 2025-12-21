@@ -79,7 +79,7 @@ impl App {
             .lock()
             .await
             .route
-            .init_route
+            .cleaned_route
             .split('/')
             .rev()
             .filter(|s| !s.is_empty())
@@ -156,10 +156,10 @@ impl App {
         let request = Arc::new(Mutex::new(web_request));
 
         //get the function to handle the resolution, backs up to a 404 if existant
-        let (init_route, method) = {
+        let (cleaned_route, method) = {
             let request_lock = request.lock().await;
             (
-                request_lock.route.init_route.clone(),
+                request_lock.route.cleaned_route.clone(),
                 request_lock.method.clone(),
             )
         };
@@ -167,7 +167,7 @@ impl App {
         let endpoint_opt = {
             let binding = router_ref.lock().await;
 
-            let route = binding.get_route(&init_route).await;
+            let route = binding.get_route(&cleaned_route).await;
 
             match route {
                 Some(r) => {

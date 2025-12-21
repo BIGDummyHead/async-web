@@ -35,6 +35,10 @@ async fn add_routes(app: &mut App) -> () {
         Box::pin(async move {
             let req_lock = req.lock().await;
 
+            println!("Request cleaned: {}", req_lock.route.cleaned_route);
+            println!("Request dirty: {}", req_lock.route.init_route);
+            println!("Name: {:#?}", req_lock.route.get_param("name"));
+
             if req_lock.variables.get("is_admin").is_none() {
                 return Middleware::InvalidEmpty(403);
             }
