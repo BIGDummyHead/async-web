@@ -1,11 +1,17 @@
 use crate::web::{Resolution, resolution::get_status_header};
 
-/// A resolution with no conetnt and just a status code.
+/// ## Empty Resolution
+/// 
+/// Implementation of the Resolution trait. 
+/// 
+/// Simply creates an empty respond to send to the client with a status code you can set.
 pub struct EmptyResolution {
     status_code: i32,
 }
 
 impl EmptyResolution {
+
+    /// Create a new boxed Empty Resolution
     pub fn new(status_code: i32) -> Box<dyn super::Resolution + Send> {
         let res = Self { status_code };
 

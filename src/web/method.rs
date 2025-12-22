@@ -1,4 +1,8 @@
-/// Represents a Web method for a request
+/// ## Method
+/// 
+/// The routing method.
+/// 
+/// Used when adding a routing type to your program or when a request comes in.
 #[derive(Debug)]
 #[derive(Eq, Hash, PartialEq)]
 #[derive(Clone)]

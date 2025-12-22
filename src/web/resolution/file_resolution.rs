@@ -9,7 +9,23 @@ use crate::web::resolution::get_status_header;
 
 use super::Resolution;
 
-/// Provides a resolution for serving files back to the client.
+
+/// ## File Resolution
+/// 
+/// Gives the abilitiy to serve a file back to a client. 
+/// 
+/// Simply takes the path of the file to use and allows you to send it back.
+/// 
+/// If the file does not exist a 404 is given back to the client
+/// 
+/// ## Example
+/// 
+/// ```
+/// // -- snip --
+/// let file_resolution = FileResolution::new("/content/item.pdf"); 
+/// ```
+/// 
+/// This could be used for a dynamic content folder if you give the ability of using wildcards in your router.
 pub struct FileResolution<'a> {
     pub file: Option<Box<&'a Path>>,
     status_code: i32,

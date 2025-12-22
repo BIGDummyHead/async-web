@@ -3,7 +3,27 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 
 
-/// An async queue for work
+/// ## Queue
+/// 
+/// Async-safe Queue used for evenly waiting and distributing workloads. 
+/// 
+/// Type R of work is added to the queue, then the dequeu function is used to await for work.
+/// 
+/// ## Example
+/// 
+/// ```
+/// let work_load = Queue::new();
+/// 
+/// work_load.queue(100);
+/// 
+/// //--snip--
+/// 
+/// //assume that we are in spawned task (one of many)
+/// 
+/// //we may also pass in an optional Arc<Mutex<bool>> that indicates to stop checking for values
+/// let opt_value = work_load_clone.deque(None);
+/// 
+/// ```
 pub struct Queue<R> {
     work: Mutex<Vec<R>>,
     pub deque_lock: Notify

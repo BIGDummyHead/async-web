@@ -5,7 +5,29 @@ use serde_json::{Value, json};
 
 use crate::web::{Resolution, resolution::get_status_header};
 
-/// A struct to convert and send json data over an app.
+/// ## JSON Resolution
+/// 
+/// Implementation of the Resolution trait. Allows for you send JSON based content back to a client.
+/// 
+/// The usage may differ from other resolutions you have experience but works just as easily.
+/// 
+/// 
+/// ## Example 
+/// 
+/// ```
+/// //assume that we are in a resolution function for our route.
+/// 
+/// //a person object exist that just has a name and age
+/// let person = Person::new("John Doe", 32);
+/// 
+/// let mut j_resolution = JsonResolution::new(person);
+/// 
+/// //we can also change the status of this resolution (it is by default 200)
+/// j_resolution.set_status(200);
+/// 
+/// //boxes the value for you
+/// return j_resolution.into_resolution();
+/// ```
 pub struct JsonResolution {
     json_value: String,
     status_code: i32,

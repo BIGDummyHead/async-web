@@ -10,7 +10,7 @@ use tokio::{
 use crate::web::{
     EndPoint, Method, Middleware, Request, Resolution, WorkManager,
     errors::{RoutingError, routing_error::RoutingErrorType},
-    middleware::MiddlewareCollection,
+    middleware::{MiddlewareClosure, MiddlewareCollection},
     resolution::empty_resolution::EmptyResolution,
     router::{ResolutionFunc, RouteNodeRef, RouteTree},
 };
@@ -31,10 +31,20 @@ pub struct App {
     pub work_manager: Arc<WorkManager<()>>,
     pub listener: Arc<TcpListener>,
     pub router: Arc<Mutex<RouteTree>>,
+    global_middleware: Arc<Mutex<Vec<MiddlewareClosure>>>,
 }
 
 /// Represents a web application where you can bind, route, and do other web server related activities.
 impl App {
+    /// ## Use Middleware
+    ///
+    /// Adds middleware that is used for each request that is created by the client.
+    ///
+    /// This is useful for a function that needs to be called for each request like authentication.
+    pub async fn use_middleware(&mut self, closure: MiddlewareClosure) {
+        self.global_middleware.lock().await.push(closure);
+    }
+
     /// ## Bind
     ///
     /// Binds the program to a Socket via TCP.
@@ -72,6 +82,7 @@ impl App {
             work_manager,
             listener,
             router,
+            global_middleware: Arc::new(Mutex::new(Vec::new())),
         };
 
         bind.consume().await;
@@ -172,6 +183,7 @@ impl App {
         let listener = self.listener.clone();
         let work_manager = self.work_manager.clone();
         let router = self.router.clone();
+        let global_middleware = self.global_middleware.clone();
 
         task::spawn(async move {
             loop {
@@ -185,10 +197,11 @@ impl App {
                 let (stream, _) = client_result.unwrap();
 
                 let router_ref = router.clone();
+                let middleware_ref = global_middleware.clone();
 
                 work_manager
                     .add_work(Box::pin(async move {
-                        Self::request_work(stream, router_ref).await;
+                        Self::request_work(stream, middleware_ref, router_ref).await;
                     }))
                     .await;
             }
@@ -206,7 +219,11 @@ impl App {
     ///
     /// Errors during processing terminate handling for the request.
 
-    async fn request_work(mut stream: TcpStream, router_ref: Arc<Mutex<RouteTree>>) -> () {
+    async fn request_work(
+        mut stream: TcpStream,
+        global_middleware: Arc<Mutex<Vec<MiddlewareClosure>>>,
+        router_ref: Arc<Mutex<RouteTree>>,
+    ) -> () {
         //process the acception and get the result from the stream
         let req_result = Self::process_acception(&mut stream).await;
 
@@ -256,30 +273,36 @@ impl App {
 
         let endpoint = endpoint_opt.unwrap();
 
-        let middleware_failed_resolution = match &endpoint.middleware {
-            None => None,
-            Some(middleware) => {
-                let mut final_middleware = None;
+        let middleware_failed_resolution = {
+            let mut final_middleware = None;
 
-                for m in middleware {
-                    let m_result = match m(request.clone()).await {
-                        Middleware::Invalid(res) => Some(res),
-                        Middleware::InvalidEmpty(status_code) => {
-                            Some(EmptyResolution::new(status_code))
-                        }
-                        Middleware::Next => None,
-                    };
+            let global_middleware_lock = global_middleware.lock().await;
 
-                    if m_result.is_none() {
-                        continue;
-                    }
+            let mut all_middleware = Vec::new();
+            all_middleware.extend_from_slice(&global_middleware_lock);
 
-                    final_middleware = Some(m_result.unwrap());
-                    break;
-                }
+            // ! Drop reference once we have all the function refs.
+            drop(global_middleware_lock);
 
-                final_middleware
+            if let Some(route_middleware) = &endpoint.middleware {
+                all_middleware.extend_from_slice(&route_middleware);
             }
+
+            for middle_ware_closure in all_middleware {
+                match middle_ware_closure(request.clone()).await {
+                    Middleware::Invalid(res) => {
+                        final_middleware = Some(res);
+                        break;
+                    }
+                    Middleware::InvalidEmpty(status_code) => {
+                        final_middleware = Some(EmptyResolution::new(status_code));
+                        break;
+                    }
+                    Middleware::Next => continue,
+                };
+            }
+
+            final_middleware
         };
 
         let write_resolution = if let Some(failed_middleware) = middleware_failed_resolution {
@@ -321,7 +344,10 @@ impl App {
         }
     }
 
-    /// Adds a new route or replaces an existing route’s resolution for the given method.
+}
+
+impl App {
+     /// Adds a new route or replaces an existing route’s resolution for the given method.
     ///
     /// If the route already exists, its resolution for the specified method is overwritten.
     ///
