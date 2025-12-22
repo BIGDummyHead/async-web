@@ -1,10 +1,11 @@
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
     sync::Arc,
+    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, time::sleep};
 
 use crate::web::{
     App, EndPoint, Method, Middleware, Request,
@@ -23,6 +24,8 @@ pub struct Person {
 async fn add_routes(app: &mut App) -> () {
     let admin: MiddlewareClosure = Arc::new(|req: Arc<Mutex<Request>>| {
         Box::pin(async move {
+            sleep(Duration::from_secs(1)).await;
+
             req.lock()
                 .await
                 .variables
@@ -35,6 +38,7 @@ async fn add_routes(app: &mut App) -> () {
         Box::pin(async move {
             let req_lock = req.lock().await;
 
+            sleep(Duration::from_secs(1)).await;
 
             if req_lock.variables.get("is_admin").is_none() {
                 return Middleware::InvalidEmpty(403);
@@ -47,7 +51,13 @@ async fn add_routes(app: &mut App) -> () {
         "/tasks",
         Method::GET,
         Some(vec![admin, is_admin]),
-        Arc::new(|_| Box::pin(async move { FileResolution::new(Some("tasks.html")) })),
+        Arc::new(|_| {
+            Box::pin(async move {
+                sleep(Duration::from_secs(1)).await;
+
+                FileResolution::new(Some("tasks.html"))
+            })
+        }),
     )
     .await;
 

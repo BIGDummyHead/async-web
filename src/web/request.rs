@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    net::{TcpStream},
+    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
+    net::TcpStream,
 };
 
 use crate::web::{Method, Route};
@@ -11,49 +11,43 @@ use crate::web::{Method, Route};
 pub struct Request {
     /// The method used for this request.
     pub method: Method,
-    /// The route of the request 
+    /// The route of the request
     pub route: Route,
     /// Any other header.
     pub headers: HashMap<String, String>,
 
-    /// Variable path items. 
-    /// 
+    /// Variable path items.
+    ///
     /// ### Example
-    /// 
+    ///
     /// You add the route "/tasks/{userId}/delete"
-    /// 
+    ///
     /// > The user fetches "/tasks/1/delete"
-    /// 
+    ///
     /// You may now retrieve from the table "userId" and get the value "1"
-    pub variables: HashMap<String, String>
+    pub variables: HashMap<String, String>,
+
+    /// Body of the request.
+    pub body: Vec<u8>,
 }
 
 impl Request {
-
     /// Parse a tcp stream request and gives back the Request
     pub async fn parse_request(stream: &mut TcpStream) -> Result<Self, std::io::Error> {
         //create a buffer that will read each line
-        let (reader, _) = stream.split();
-        let buf_reader = BufReader::new(reader);
-        let mut lines = buf_reader.lines();
+        let mut reader = BufReader::new(stream);
+
+        let mut first_line = String::new();
 
         //the first line should be parsed independently
-        let first_line_result = lines.next_line().await;
+        reader.read_line(&mut first_line).await?;
 
-        if let Err(e) = first_line_result {
-            return Err(e);
-        }
-
-        let opt_first_line = first_line_result.unwrap();
-
-        if opt_first_line.is_none() {
+        if first_line.is_empty() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "The first line was not found.",
             ));
         }
-
-        let first_line = opt_first_line.unwrap();
 
         let mut request_header = first_line.split(" ");
 
@@ -92,28 +86,39 @@ impl Request {
         let mut headers = HashMap::new();
 
         //insert all headers
-        while let Ok(Some(v)) = lines.next_line().await {
+        loop {
+            let mut read_line = String::new();
 
-            if v.is_empty() {
+            reader.read_line(&mut read_line).await?;
+
+            let header = read_line.trim_end();
+
+            if header.is_empty() {
                 break;
             }
 
-            let header = v.split_once(":");
-
-            if let None = header {
-                continue;
+            if let Some((header_key, header_val)) = header.split_once(":") {
+                headers.insert(String::from(header_key), String::from(header_val.trim()));
             }
+        }
 
-            let (key, val) = header.unwrap();
+        let content_length = headers
+            .get("Content-Length")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0);
 
-            headers.insert(String::from(key), String::from(val));
+        let mut body = vec![0u8; content_length];
+
+        if content_length > 0 {
+            reader.read_exact(&mut body).await?;
         }
 
         Ok(Self {
             method,
             route,
             headers,
-            variables: HashMap::new()
+            body,
+            variables: HashMap::new(),
         })
     }
 }
