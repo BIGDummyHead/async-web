@@ -8,7 +8,33 @@ use crate::web::{
     router::{RouteNode, RouteNodeRef},
 };
 
-///Binary type tree that takes in parts of a route and ends up at a final function.
+
+/// # Route tree
+/// 
+/// Trie based tree that separates a given route into nodes and contains information about their nodes such as:
+/// 
+/// * id (the part of the route)
+/// * EndPoint (middleware and requested function)
+/// 
+/// And Other relevant information about the node.
+/// 
+/// To edit the base route (/) you may edit the root variable.
+/// 
+/// You may also add a missing route via the "add_missing_route" function or set the missing_route variable.
+/// 
+/// #### Adding a Route
+/// 
+/// Suppose you would like to add a route to the tree, you may call the add_route function. Please refer to the documentation on the method as it is rather in depth.
+/// 
+/// #### Removing a Route
+/// 
+/// You cannot remove a Route, this is built on purpose, as Routing for a web application would usually be a STATIC based activity wherein you would not add/remove routing during the runtime.
+/// 
+/// 
+/// #### Getting a Route
+/// 
+/// Getting a route is straight forward. You may refer to the get_route(&str) function to do so. 
+/// 
 pub struct RouteTree {
     /// Route node for /
     pub root: RouteNodeRef,
@@ -17,7 +43,7 @@ pub struct RouteTree {
     pub missing_route: Option<RouteNode>,
 }
 
-/// Routing Tree that holds information about resolutions for all your routes.
+
 impl RouteTree {
     /// Create a new route tree with a resolution. Usually a GET
     pub fn new(base_resolution: Option<(Method, EndPoint)>) -> Self {
@@ -59,6 +85,7 @@ impl RouteTree {
     ///    )),
     ///);
     ///);
+    /// 
     /// ```
     pub async fn add_route(
         &mut self,
@@ -134,7 +161,29 @@ impl RouteTree {
         Ok(())
     }
 
-    /// Borrow an existing route.
+
+    /// # Get Route
+    /// 
+    /// Get an existing route node ref.
+    /// 
+    /// Although you may not wind up using this function as it is used by the router. In where the route is completely sanitized before handed to this.
+    /// 
+    /// Assume we have added a route to get a user by their ID such as "/api/admin/user/{id}"
+    /// 
+    /// To get the route:
+    /// 
+    /// ```
+    /// {
+    ///     //-- snip --
+    ///     // see how we can pass in any variable to the route?
+    ///     let opt_route: Option<RouteNodeRef> = tree.get_route("/api/admin/user/12");
+    /// 
+    /// }
+    /// 
+    /// ```
+    /// 
+    /// Since it returns a reference (Arc<Mutex<RouteNode>>) you may lock it and change it via the mutability pattern.
+    /// 
     pub async fn get_route(&self, full_route: &str) -> Option<RouteNodeRef> {
         //start with the root and work our way down
         let mut current_node = Some(self.root.clone());

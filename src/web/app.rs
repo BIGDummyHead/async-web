@@ -15,6 +15,18 @@ use crate::web::{
     router::{ResolutionFunc, RouteNodeRef, RouteTree},
 };
 
+/// # App
+///
+/// Represents an async Web Based Application with workers, routers, and a TCP Listener.
+///
+/// To create an app you may use:
+///
+/// ```
+///  // --snip--
+/// let app_creation_result = App::bind(worker_count, addr);
+///
+/// // Check if app was created successfully
+/// ```
 pub struct App {
     pub work_manager: Arc<WorkManager<()>>,
     pub listener: Arc<TcpListener>,
@@ -23,6 +35,23 @@ pub struct App {
 
 /// Represents a web application where you can bind, route, and do other web server related activities.
 impl App {
+    /// ## Bind
+    ///
+    /// Binds the program to a Socket via TCP.
+    ///
+    /// ### Example
+    ///
+    /// ```
+    /// //local app settings.
+    ///let addr = Ipv4Addr::new(127, 0, 0, 1);
+    ///let port = 8080;
+    ///
+    /// //the count of wokrers to make
+    ///let workers = 100;
+    ///
+    /////try bind socket.
+    ///let app_bind = App::bind(workers, SocketAddrV4::new(addr, port)).await;
+    /// ```
     pub async fn bind<A>(worker_count: usize, addr: A) -> Result<Self, std::io::Error>
     where
         A: ToSocketAddrs,
@@ -50,7 +79,14 @@ impl App {
         Ok(bind)
     }
 
-    /// Spawns a task to consume received information from the work manager.
+    ///  consume
+    ///
+    /// Spawns a background task that continuously consumes messages from the work manager receiver.
+    ///
+    /// Prevents the internal work channel from filling and blocking producers.
+    ///
+    /// Runs until the receiver channel is closed.
+
     async fn consume(&self) -> JoinHandle<()> {
         let receiver = self.work_manager.receiver.clone();
 
@@ -61,7 +97,14 @@ impl App {
         })
     }
 
-    /// Proccesses each acception from the stream
+    /// Reads from an incoming TCP stream and parses it into a `Request`.
+    ///
+    /// Handles request decoding and validation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the stream cannot be read or the request is malformed.
+
     async fn process_acception(mut stream: &mut TcpStream) -> Result<Request, std::io::Error> {
         let request_result = Request::parse_request(&mut stream).await;
 
@@ -73,6 +116,11 @@ impl App {
 
         Ok(request)
     }
+
+    /// Extracts dynamic route parameters from the matched route tree.
+    ///
+    /// Traverses parent route nodes and assigns variable values into the request.
+    /// This is executed after routing but before middleware and resolution execution.
 
     async fn set_request_variables(req_ref: Arc<Mutex<Request>>, route_ref: RouteNodeRef) -> () {
         let route_parts: Vec<String> = req_ref
@@ -112,7 +160,14 @@ impl App {
         }
     }
 
-    /// Starts the app, returns a handle referencing the app's task.
+    /// Starts the main TCP accept loop for the application.
+    ///
+    /// Each accepted connection is submitted to the work manager for processing.
+    ///
+    /// # Returns
+    ///
+    /// A `JoinHandle` referencing the spawned server task.
+
     pub async fn start(&self) -> JoinHandle<()> {
         let listener = self.listener.clone();
         let work_manager = self.work_manager.clone();
@@ -140,7 +195,17 @@ impl App {
         })
     }
 
-    /// Work to be completed by a worker, takes the stream to write a resolution and the route tree to use.
+    /// Executes all logic required to handle a single client request.
+    ///
+    /// This includes:
+    /// - Parsing the request
+    /// - Resolving the route and method
+    /// - Applying middleware
+    /// - Executing the endpoint resolution
+    /// - Writing the response to the TCP stream
+    ///
+    /// Errors during processing terminate handling for the request.
+
     async fn request_work(mut stream: TcpStream, router_ref: Arc<Mutex<RouteTree>>) -> () {
         //process the acception and get the result from the stream
         let req_result = Self::process_acception(&mut stream).await;
@@ -223,7 +288,6 @@ impl App {
             Some((endpoint.resolution)(request.clone()).await)
         };
 
-
         if write_resolution.as_ref().is_none() {
             return;
         }
@@ -231,7 +295,14 @@ impl App {
         Self::resolve(write_resolution.unwrap(), &mut stream).await;
     }
 
-    /// Calls and consumes the resolution, passing the request, then writes to the stream
+    /// Finalizes a `Resolution` into a complete HTTP response.
+    ///
+    /// Writes headers, content length, and body to the provided TCP stream.
+    ///
+    /// # Errors
+    ///
+    /// I/O errors encountered during writing are logged but not returned.
+
     async fn resolve(resolved: Box<dyn Resolution + Send>, stream: &mut TcpStream) {
         // get the resolution if any
 
@@ -250,9 +321,14 @@ impl App {
         }
     }
 
-    /// Adds or changes the given route.
+    /// Adds a new route or replaces an existing route’s resolution for the given method.
     ///
-    /// Returns an error if there was any error adding the route.
+    /// If the route already exists, its resolution for the specified method is overwritten.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `RoutingError` if the route cannot be added.
+
     pub async fn add_or_change_route(
         &self,
         route: &str,
@@ -266,9 +342,13 @@ impl App {
         router.add_route(route, Some((method, endpoint))).await
     }
 
-    /// Add route to the router.
+    /// Adds a new route or replaces an existing route’s resolution for the given method.
     ///
-    /// Returns a Routing Error if the route exist or if there was any error adding the route.
+    /// If the route already exists, its resolution for the specified method is overwritten.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `RoutingError` if the route cannot be added.
     pub async fn add_route(
         &self,
         route: &str,
@@ -292,7 +372,13 @@ impl App {
         router.add_route(route, route_res).await
     }
 
-    /// Adds the route to the router or panics if the exact route and method exist!
+    /// Adds a route and method combination to the router.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the route already exists or cannot be added.
+    /// Intended for use during application initialization.
+
     pub async fn add_or_panic(
         &self,
         route: &str,
@@ -306,6 +392,11 @@ impl App {
             panic!("When adding route '{route}' an error occurred because '{e}'");
         }
     }
+
+    /// Provides exclusive access to the internal route tree.
+    ///
+    /// Returns a locked guard allowing inspection or modification of routing state.
+    /// This call blocks until the router mutex becomes available.
 
     pub async fn get_router(&self) -> MutexGuard<'_, RouteTree> {
         self.router.lock().await

@@ -35,6 +35,11 @@ impl std::fmt::Display for Route {
 
 impl Route {
 
+    /// ## Parse Route
+    /// 
+    /// Parses a pure string route provided by a client and returns a route object.
+    /// 
+    /// init_route should be something like "/test/api/admin"
     pub fn parse_route(init_route: String) -> Self {
         let mut parsed = HashMap::new();
 
@@ -84,10 +89,14 @@ impl Route {
         }
     }
 
+    /// Get a parameter from the user provided route.
+    /// 
+    /// Returns Some(param: &String) if it exist.
     pub fn get_param(&self, param_name: &str) -> Option<&String> {
         self.params.get(param_name)
     }
 
+    /// Returns a reference to the parameter hashmap.
     pub fn get_params(&self) -> &HashMap<String, String> {
         &self.params
     }

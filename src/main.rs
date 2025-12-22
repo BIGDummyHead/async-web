@@ -35,9 +35,6 @@ async fn add_routes(app: &mut App) -> () {
         Box::pin(async move {
             let req_lock = req.lock().await;
 
-            println!("Request cleaned: {}", req_lock.route.cleaned_route);
-            println!("Request dirty: {}", req_lock.route.init_route);
-            println!("Name: {:#?}", req_lock.route.get_param("name"));
 
             if req_lock.variables.get("is_admin").is_none() {
                 return Middleware::InvalidEmpty(403);
@@ -106,7 +103,7 @@ async fn create_local_app() -> App {
     //local app settings.
     let addr = Ipv4Addr::new(127, 0, 0, 1);
     let port = 8080;
-    let workers = 100;
+    let workers = 5;
 
     //try bind socket.
     let app_bind = App::bind(workers, SocketAddrV4::new(addr, port)).await;
