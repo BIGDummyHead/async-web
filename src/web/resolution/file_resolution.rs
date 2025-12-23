@@ -66,11 +66,11 @@ impl<'a> Resolution for FileResolution<'a> {
         Box::pin(async move { vec![get_status_header(self.status_code)] })
     }
 
-    fn get_content(&self) -> Pin<Box<dyn Future<Output = String> + Send + '_>> {
+    fn get_content(&self) -> Pin<Box<dyn Future<Output = Vec<u8>> + Send + '_>> {
         Box::pin(async move {
             //No content to serve.
             if self.file.is_none() {
-                return "".to_string();
+                return Vec::new();
             }
 
             let path = self.file.as_ref().unwrap();
@@ -84,7 +84,7 @@ impl<'a> Resolution for FileResolution<'a> {
 
             let read_result = fs::read_to_string(&absolute_path.unwrap()).await;
             if let Ok(s) = read_result {
-                return s;
+                return s.into_bytes();
             }
 
             todo!();

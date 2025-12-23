@@ -3,9 +3,11 @@ use std::pin::Pin;
 pub mod file_resolution;
 pub mod json_resolution;
 pub mod empty_resolution;
+pub mod file_bytes;
 
 /// Represents a resolution for a request
 pub trait Resolution {
+
     ///
     /// Get all headers for the HTTP response.
     ///
@@ -13,7 +15,7 @@ pub trait Resolution {
 
     ///
     /// Get the content for the resolution. Gets pushed into the headers. Then a length is used.
-    fn get_content(&self) ->  Pin<Box<dyn Future<Output = String> + Send + '_>>;
+    fn get_content(&self) ->  Pin<Box<dyn Future<Output = Vec<u8>> + Send + '_>>;
 
 }
 
@@ -122,4 +124,16 @@ pub fn get_status_header(status_code: i32) -> String {
     let status = get_status(&status_code);
 
     return format!("HTTP/1.1 {} {}", status_code, status).to_string();
+}
+
+
+/// Signals that there is no content to serve. 
+/// 
+/// Equal to 
+/// 
+/// ```
+/// let result:Vec<u8> = Vec::new();
+/// ```
+pub fn empty_content() -> Vec<u8> {
+    Vec::new()
 }

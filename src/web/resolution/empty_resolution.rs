@@ -1,4 +1,4 @@
-use crate::web::{Resolution, resolution::get_status_header};
+use crate::web::{Resolution, resolution::{empty_content, get_status_header}};
 
 /// ## Empty Resolution
 /// 
@@ -24,7 +24,7 @@ impl Resolution for EmptyResolution {
         Box::pin(async move { vec![get_status_header(self.status_code)] })
     }
 
-    fn get_content(&self) -> std::pin::Pin<Box<dyn Future<Output = String> + Send + '_>> {
-        Box::pin(async move { "".to_string() })
+    fn get_content(&self) -> std::pin::Pin<Box<dyn Future<Output = Vec<u8>> + Send + '_>> {
+        Box::pin(async move { empty_content() })
     }
 }

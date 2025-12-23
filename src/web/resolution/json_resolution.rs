@@ -81,7 +81,7 @@ impl Resolution for JsonResolution {
         })
     }
 
-    fn get_content(&self) -> Pin<Box<dyn Future<Output = String> + Send + '_>> {
-        Box::pin(async move { self.json_value.clone() })
+    fn get_content(&self) -> Pin<Box<dyn Future<Output = Vec<u8>> + Send + '_>> {
+        Box::pin(async move { self.json_value.clone().into_bytes() })
     }
 }

@@ -335,9 +335,12 @@ impl App {
 
         full_response.push_str(&format!("\r\nContent-Length: {c_length}\r\n"));
         full_response.push_str("\r\n");
-        full_response.push_str(&content);
 
-        let write_result = stream.write_all(full_response.as_bytes()).await;
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(&full_response.into_bytes());
+        buffer.extend_from_slice(&content);
+
+        let write_result = stream.write_all(&buffer).await;
 
         if let Err(e) = write_result {
             eprintln!("Error when writing to the endpoint TCP Stream: {e}");

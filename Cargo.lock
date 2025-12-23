@@ -3,6 +3,16 @@
 version = 4
 
 [[package]]
+name = "async-web"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -145,16 +155,6 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "multi-web"
-version = "0.1.0"
-dependencies = [
- "futures",
- "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
