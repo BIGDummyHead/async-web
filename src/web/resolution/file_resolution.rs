@@ -1,93 +1,131 @@
-use std::{
-    path::{Path, absolute},
-    pin::Pin,
-};
+use tokio::{fs, io::AsyncReadExt};
 
-use tokio::fs;
+use crate::web::{Resolution, resolution::{empty_content, get_status_header}};
 
-use crate::web::resolution::get_status_header;
-
-use super::Resolution;
-
-
-/// ## File Resolution
+/// # File Resolution
+///
+/// Resolution that gives you the ability to serve files as an array of bytes.
 /// 
-/// Gives the abilitiy to serve a file back to a client. 
-/// 
-/// Simply takes the path of the file to use and allows you to send it back.
-/// 
-/// If the file does not exist a 404 is given back to the client
+/// This is useful for a content folder where you need to serve non-text based files.
 /// 
 /// ## Example
 /// 
 /// ```
-/// // -- snip --
-/// let file_resolution = FileResolution::new("/content/item.pdf"); 
-/// ```
+///  let file_resolution = FileResolution::new("/images/profile_image.png".to_string());
+/// ``` 
 /// 
-/// This could be used for a dynamic content folder if you give the ability of using wildcards in your router.
-pub struct FileResolution<'a> {
-    pub file: Option<Box<&'a Path>>,
-    status_code: i32,
+/// The content type of the file is determined based on the extension, this header is passed via the Resolution::get_headers function.
+/// 
+/// The status of the file is determined based on if the file exist.
+/// 
+/// If the file `exist` than the status is `200`
+/// 
+/// If the file `does not exist` than the status is `404`
+/// 
+pub struct FileResolution {
+    pub file_path: String,
 }
 
-impl<'a> FileResolution<'a> {
-    /// Create a new file resolution with status codes based on if the provided file exist.
-    ///
-    /// You can pass none into file_path which results in a 404 error.
-    pub fn new(file_path: Option<&'a str>) -> Box<dyn super::Resolution + Send + 'a> {
-        let mut path: Option<Box<&'a Path>> = None;
+impl FileResolution {
 
-        let status_code = match file_path {
-            None => 404,
-            Some(f_path) => {
-                let f_path: &'a Path = Path::new(f_path);
+    pub fn new(file_path: String) -> Box<dyn super::Resolution + Send> {
+        let res = Self { file_path };
 
-                let code = if f_path.exists() && f_path.is_file() {
-                    200
-                } else {
-                    404
-                };
+        Box::new(res) as Box<dyn super::Resolution + Send>
+    }
 
-                path = Some(Box::new(f_path));
-                code
-            }
+    /// Retrieves the file type for a header.
+    fn get_file_type_header(&self) -> String {
+        // extract extension (lowercased)
+        let ext = match std::path::Path::new(&self.file_path)
+            .extension()
+            .and_then(|e| e.to_str())
+        {
+            Some(e) => e.to_lowercase(),
+            None => return "application/octet-stream".to_string(),
         };
 
-        Box::new(Self {
-            status_code,
-            file: path,
-        }) as Box<dyn Resolution + Send + 'a>
+        match ext.as_str() {
+            // text types
+            "html" | "htm" => "text/html",
+            "css" => "text/css",
+            "js" => "application/javascript",
+            "json" => "application/json",
+            "txt" => "text/plain",
+            "csv" => "text/csv",
+            "xml" => "application/xml",
+
+            // images
+            "jpg" | "jpeg" => "image/jpeg",
+            "png" => "image/png",
+            "gif" => "image/gif",
+            "bmp" => "image/bmp",
+            "webp" => "image/webp",
+            "svg" => "image/svg+xml",
+            "ico" => "image/x-icon",
+
+            // audio / video
+            "mp3" => "audio/mpeg",
+            "wav" => "audio/wav",
+            "ogg" => "audio/ogg",
+            "mp4" => "video/mp4",
+            "webm" => "video/webm",
+
+            // fonts
+            "woff" => "font/woff",
+            "woff2" => "font/woff2",
+            "ttf" => "font/ttf",
+            "otf" => "font/otf",
+
+            // documents / archives
+            "pdf" => "application/pdf",
+            "zip" => "application/zip",
+            "tar" => "application/x-tar",
+            "gz" => "application/gzip",
+
+            // fallback
+            _ => "application/octet-stream",
+        }
+        .to_string()
+    }
+
+    fn get_status(&self) -> i32 {
+        let path = std::path::Path::new(&self.file_path);
+
+        if path.exists() {
+            return 200;
+        }
+
+        404
     }
 }
 
-impl<'a> Resolution for FileResolution<'a> {
-    fn get_headers(&self) -> Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>> {
-        Box::pin(async move { vec![get_status_header(self.status_code)] })
+impl Resolution for FileResolution {
+    fn get_headers(&self) -> std::pin::Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>> {
+        Box::pin(async move { vec![get_status_header(self.get_status()), self.get_file_type_header()] })
     }
 
-    fn get_content(&self) -> Pin<Box<dyn Future<Output = Vec<u8>> + Send + '_>> {
+    fn get_content(&self) -> std::pin::Pin<Box<dyn Future<Output = Vec<u8>> + Send + '_>> {
         Box::pin(async move {
-            //No content to serve.
-            if self.file.is_none() {
-                return Vec::new();
+            if self.get_status() != 200 {
+                return empty_content();
             }
 
-            let path = self.file.as_ref().unwrap();
+            let file_open = fs::File::open(&self.file_path).await;
 
-            let absolute_path = absolute(**path);
-
-            //
-            if let Err(_) = absolute_path {
-                todo!()
+            if file_open.is_err() {
+                return empty_content();
             }
 
-            let read_result = fs::read_to_string(&absolute_path.unwrap()).await;
-            if let Ok(s) = read_result {
-                return s.into_bytes();
+            let mut file = file_open.unwrap();
+
+            let mut buffer = Vec::new();
+
+            if let Err(e) = file.read_to_end(&mut buffer).await {
+                todo!("Failed to read to end: {e}");
             }
 
-            todo!();
+            buffer
         })
     }
 }

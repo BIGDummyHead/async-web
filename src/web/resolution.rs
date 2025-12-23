@@ -1,9 +1,9 @@
 use std::pin::Pin;
 
-pub mod file_resolution;
+pub mod file_text_resolution;
 pub mod json_resolution;
 pub mod empty_resolution;
-pub mod file_bytes;
+pub mod file_resolution;
 
 /// Represents a resolution for a request
 pub trait Resolution {
