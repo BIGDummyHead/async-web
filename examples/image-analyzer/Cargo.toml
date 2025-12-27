@@ -1,0 +1,16 @@
+[package]
+name = "image-analyzer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+async-web = { path="../async-web" }
+candle-core = { git = "https://github.com/huggingface/candle.git" }
+candle-nn = { git = "https://github.com/huggingface/candle.git" }
+candle-transformers = { git = "https://github.com/huggingface/candle.git" }
+tokenizers = "0.22.2"
+image = "0.25.9"
+hf-hub = { version = "0.4.3", features = ["tokio"] }
+serde = { version = "1.0.228", features = ["derive"] }
+

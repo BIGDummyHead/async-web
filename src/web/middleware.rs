@@ -55,6 +55,6 @@ pub enum Middleware {
     /// Filled with a status code
     InvalidEmpty(i32),
 
-    /// The middleware was a success, move forward towards the request, however you can optionally send a resolution.
+    /// The middleware was a success, move forward towards the request.
     Next,
 }
