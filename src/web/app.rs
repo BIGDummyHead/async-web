@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use futures::StreamExt;
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream, ToSocketAddrs},
@@ -315,7 +316,11 @@ impl App {
             return;
         }
 
-        Self::resolve(write_resolution.unwrap(), &mut stream).await;
+        let resolved = Self::resolve(write_resolution.unwrap(), &mut stream).await;
+
+        if let Err(e_r) = resolved {
+            println!("Failed to resolve request: {e_r}");
+        }
     }
 
     /// Finalizes a `Resolution` into a complete HTTP response.
@@ -326,31 +331,51 @@ impl App {
     ///
     /// I/O errors encountered during writing are logged but not returned.
 
-    async fn resolve(resolved: Box<dyn Resolution + Send>, stream: &mut TcpStream) {
-        // get the resolution if any
+    async fn resolve(
+        resolved: Box<dyn Resolution + Send>,
+        stream: &mut TcpStream,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        
+        //write the headers to the stream
+        let mut headers = resolved.get_headers().await.join("\r\n");
+        headers.push_str("\r\nTransfer-Encoding: chunked\r\n\r\n");
+        stream.write_all(headers.as_bytes()).await?;
 
-        let mut full_response = resolved.get_headers().await.join("\r\n");
-        let content = resolved.get_content().await;
-        let c_length = content.len();
+        let mut content = resolved.get_content();
 
-        full_response.push_str(&format!("\r\nContent-Length: {c_length}\r\n"));
-        full_response.push_str("\r\n");
+        //retrieve the next chunk of the body
+        while let Some(chunk) = content.next().await {
 
-        let mut buffer = Vec::new();
-        buffer.extend_from_slice(&full_response.into_bytes());
-        buffer.extend_from_slice(&content);
+            let size = chunk.len();
 
-        let write_result = stream.write_all(&buffer).await;
+            if size <= 0 {
+                continue; //nothing to write 
+            }
 
-        if let Err(e) = write_result {
-            eprintln!("Error when writing to the endpoint TCP Stream: {e}");
+            //size header.
+            let size_header = format!("{size:X}\r\n");
+            stream.write_all(size_header.as_bytes()).await?;
+
+            //content
+            stream.write_all(&chunk).await?;
+
+            //terminator
+            stream.write_all(b"\r\n").await?;
+
+            
+
+
         }
-    }
 
+        //indicate end of stream
+        stream.write_all(b"0\r\n\r\n").await?;
+
+        Ok(())
+    }
 }
 
 impl App {
-     /// Adds a new route or replaces an existing route’s resolution for the given method.
+    /// Adds a new route or replaces an existing route’s resolution for the given method.
     ///
     /// If the route already exists, its resolution for the specified method is overwritten.
     ///

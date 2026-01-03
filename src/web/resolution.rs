@@ -1,13 +1,13 @@
+use futures::Stream;
 use std::pin::Pin;
 
-pub mod file_text_resolution;
-pub mod json_resolution;
 pub mod empty_resolution;
 pub mod file_resolution;
+pub mod file_text_resolution;
+pub mod json_resolution;
 
 /// Represents a resolution for a request
 pub trait Resolution {
-
     ///
     /// Get all headers for the HTTP response.
     ///
@@ -15,19 +15,18 @@ pub trait Resolution {
 
     ///
     /// Get the content for the resolution. Gets pushed into the headers. Then a length is used.
-    fn get_content(&self) ->  Pin<Box<dyn Future<Output = Vec<u8>> + Send + '_>>;
-
+    fn get_content(&self) -> Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>;
 }
 
 /// Returns a status string based on a code.
-/// 
+///
 /// ### Example
 /// ```
 /// let status = get_status(200);
 ///
 /// //output is OK
 /// println!("{status}");
-/// 
+///
 /// ```
 pub fn get_status(status_code: &i32) -> &str {
     match status_code {
@@ -108,29 +107,27 @@ pub fn get_status(status_code: &i32) -> &str {
 }
 
 /// Gives you back the appropriate header based on a status code.
-/// 
+///
 /// ### Example
-/// 
+///
 /// ```
 /// let header = get_status_header(200);
-/// 
-/// //outputs HTTP/1.1 200 OK
-/// println!("{}", header); 
 ///
-/// 
+/// //outputs HTTP/1.1 200 OK
+/// println!("{}", header);
+///
+///
 /// ```
 pub fn get_status_header(status_code: i32) -> String {
-    
     let status = get_status(&status_code);
 
     return format!("HTTP/1.1 {} {}", status_code, status).to_string();
 }
 
-
-/// Signals that there is no content to serve. 
-/// 
-/// Equal to 
-/// 
+/// Signals that there is no content to serve.
+///
+/// Equal to
+///
 /// ```
 /// let result:Vec<u8> = Vec::new();
 /// ```

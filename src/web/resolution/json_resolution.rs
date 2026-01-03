@@ -1,5 +1,6 @@
 use std::pin::Pin;
 
+use futures::{Stream, stream};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -81,7 +82,12 @@ impl Resolution for JsonResolution {
         })
     }
 
-    fn get_content(&self) -> Pin<Box<dyn Future<Output = Vec<u8>> + Send + '_>> {
-        Box::pin(async move { self.json_value.clone().into_bytes() })
+    fn get_content(&self) ->  Pin<Box<dyn Stream<Item = Vec<u8>> + Send + 'static>>  {
+        
+        let json_value = self.json_value.clone();
+        
+        Box::pin(stream::once( async move { 
+            json_value.into_bytes() 
+        }))
     }
 }

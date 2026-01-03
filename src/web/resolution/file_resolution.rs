@@ -1,3 +1,4 @@
+use futures::{Stream, stream};
 use tokio::{fs, io::AsyncReadExt};
 
 use crate::web::{Resolution, resolution::{empty_content, get_status_header}};
@@ -105,13 +106,15 @@ impl Resolution for FileResolution {
         Box::pin(async move { vec![get_status_header(self.get_status()), self.get_file_type_header()] })
     }
 
-    fn get_content(&self) -> std::pin::Pin<Box<dyn Future<Output = Vec<u8>> + Send + '_>> {
-        Box::pin(async move {
-            if self.get_status() != 200 {
+    fn get_content(&self) -> std::pin::Pin<Box<dyn Stream<Item = Vec<u8>> + Send + 'static>> {
+        let file_path = self.file_path.clone();
+        Box::pin(stream::once(async move {
+            let path = std::path::Path::new(&file_path);
+            if !path.exists() {
                 return empty_content();
             }
 
-            let file_open = fs::File::open(&self.file_path).await;
+            let file_open = fs::File::open(&file_path).await;
 
             if file_open.is_err() {
                 return empty_content();
@@ -126,6 +129,6 @@ impl Resolution for FileResolution {
             }
 
             buffer
-        })
+        }))
     }
 }
