@@ -12,6 +12,13 @@ Minimal asynchronous web server framework in Rust built on Tokio. It exposes a s
 - **Requests:** [`web::Request`](src/web/request.rs) parses method, path, headers, body; routes are normalized with [`web::Route`](src/web/route.rs).
 - **Errors:** Routing/worker/resolution errors live under [src/web/errors](src/web/errors.rs).
 
+## Examples
+
+[Alt Text Generator](https://github.com/BIGDummyHead/async-web/tree/master/examples/image-analyzer) 
+
+- Uses [candle](https://github.com/huggingface/candle) to generate alt text based on an image. Creates a POST route that takes bytes from an image and returns a JSON based response. 
+
+
 ## Quick start
 
 ```rust
