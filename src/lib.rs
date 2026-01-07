@@ -9,9 +9,9 @@ mod tests {
         sync::Arc,
     };
 
-    use crate::web::{
+    use crate::{route, web::{
         App, EndPoint, Method, resolution::empty_resolution::EmptyResolution, router::RouteTree,
-    };
+    }};
 
     /// Can be used for other test to create a bind on the local machine.
     async fn create_local_app() -> Result<App, Error> {
@@ -22,6 +22,28 @@ mod tests {
 
         //try bind socket.
         App::bind(workers, SocketAddrV4::new(addr, port)).await
+    }
+
+    #[tokio::test]
+    async fn test_route_macro() {
+        let app = create_local_app().await;
+
+        assert!(app.is_ok(), "App was not created successfully {:?}", app.err());
+
+        let app = app.unwrap();
+
+        app.add_or_panic("/test/this", Method::GET, None, route!(req, {
+            
+            let req = req.lock().await;
+
+            println!("Request for: {}", req.method);
+
+            EmptyResolution::new(200)
+        })).await;
+
+        let r = app.get_router().await.get_route("/test/this").await;
+
+        assert!(r.is_some());
     }
 
     #[tokio::test]

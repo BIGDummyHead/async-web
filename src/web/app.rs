@@ -335,7 +335,6 @@ impl App {
         resolved: Box<dyn Resolution + Send>,
         stream: &mut TcpStream,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        
         //write the headers to the stream
         let mut headers = resolved.get_headers().await.join("\r\n");
         headers.push_str("\r\nTransfer-Encoding: chunked\r\n\r\n");
@@ -345,7 +344,6 @@ impl App {
 
         //retrieve the next chunk of the body
         while let Some(chunk) = content.next().await {
-
             let size = chunk.len();
 
             if size <= 0 {
@@ -361,10 +359,6 @@ impl App {
 
             //terminator
             stream.write_all(b"\r\n").await?;
-
-            
-
-
         }
 
         //indicate end of stream
@@ -372,6 +366,15 @@ impl App {
 
         Ok(())
     }
+}
+
+#[macro_export]
+macro_rules! route {
+    ($req:pat, $fnc:expr) => {
+        Arc::new(|$req: Arc<tokio::sync::Mutex<crate::web::Request>>| Box::pin( async move {
+            $fnc
+        } ))
+    };
 }
 
 impl App {
