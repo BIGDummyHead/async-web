@@ -370,10 +370,8 @@ impl App {
 
 #[macro_export]
 macro_rules! route {
-    ($req:pat, $fnc:expr) => {
-        Arc::new(|$req: Arc<tokio::sync::Mutex<crate::web::Request>>| Box::pin( async move {
-            $fnc
-        } ))
+    ($req:ident, $body:expr) => {
+        Arc::new(|$req| Box::pin(async move { $body }) )
     };
 }
 
