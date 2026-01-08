@@ -9,9 +9,14 @@ mod tests {
         sync::Arc,
     };
 
-    use crate::{route, web::{
-        App, EndPoint, Method, resolution::empty_resolution::EmptyResolution, router::RouteTree,
-    }};
+
+    use tokio::sync::Mutex;
+
+    use crate::{
+        middleware, resolve, web::{
+            App, EndPoint, Method, Middleware, resolution::empty_resolution::EmptyResolution, router::RouteTree
+        }
+    };
 
     /// Can be used for other test to create a bind on the local machine.
     async fn create_local_app() -> Result<App, Error> {
@@ -28,22 +33,88 @@ mod tests {
     async fn test_route_macro() {
         let app = create_local_app().await;
 
-        assert!(app.is_ok(), "App was not created successfully {:?}", app.err());
+        assert!(
+            app.is_ok(),
+            "App was not created successfully {:?}",
+            app.err()
+        );
 
-        let app = app.unwrap();
+        let app = Arc::new(app.unwrap());
 
-        app.add_or_panic("/test/this", Method::GET, None, route!(req, {
-            
-            let req = req.lock().await;
+        app.add_or_panic(
+            "/test/this",
+            Method::GET,
+            None,
+            resolve!(req, {
+                let req = req.lock().await;
 
-            println!("Request for: {}", req.method);
+                println!("Request for: {}", req.method);
 
-            EmptyResolution::new(200)
-        })).await;
+                EmptyResolution::new(200)
+            }),
+        )
+        .await;
+
+        let counter = 10;
+
+        let counter_ref = Arc::new(Mutex::new(counter));
+
+        app.add_or_panic(
+            "/test/this",
+            Method::PATCH,
+            None,
+            resolve!(req, moves[counter_ref], {
+                let req = req.lock().await;
+
+                println!("Request for: {}", req.method);
+
+                {
+                    let mut times_called = counter_ref.lock().await;
+                    *times_called += 1;
+                    println!("Request called {} times", *times_called);
+                }
+
+                EmptyResolution::new(200)
+            }),
+        )
+        .await;
+
+        let m_ware = middleware!(_req, {
+            println!("Middleware 1");
+            Middleware::Next
+        });
+
+        let m_ware_other = middleware!(_req, {
+            println!("Middleware 2");
+            Middleware::Next
+        });
+
+        let m_collect = middleware!(m_ware, m_ware_other);
+
+        app.add_or_panic(
+            "/test/this/middleware",
+            Method::GET,
+            m_collect,
+            resolve!(_req, { EmptyResolution::new(200) }),
+        )
+        .await;
 
         let r = app.get_router().await.get_route("/test/this").await;
 
         assert!(r.is_some());
+
+        let r = r.unwrap();
+        let route_lock = r.lock().await;
+
+        assert!(
+            route_lock.get_resolution(&Method::GET).is_some(),
+            "Missing GET method"
+        );
+        assert!(
+            route_lock.get_resolution(&Method::PATCH).is_some(),
+            "Missing PATCH method"
+        );
+
     }
 
     #[tokio::test]
@@ -55,10 +126,7 @@ mod tests {
                 "",
                 Some((
                     Method::GET,
-                    EndPoint::new(
-                        Arc::new(|_| Box::pin(async move { EmptyResolution::new(200) })),
-                        None,
-                    ),
+                    EndPoint::new(resolve!(_req, { EmptyResolution::new(200) }), None),
                 )),
             )
             .await;
@@ -68,10 +136,7 @@ mod tests {
                 "/test",
                 Some((
                     Method::GET,
-                    EndPoint::new(
-                        Arc::new(|_| Box::pin(async move { EmptyResolution::new(200) })),
-                        None,
-                    ),
+                    EndPoint::new(resolve!(_req, { EmptyResolution::new(200) }), None),
                 )),
             )
             .await;
@@ -81,10 +146,7 @@ mod tests {
                 "/test/{user_id}/{name}",
                 Some((
                     Method::GET,
-                    EndPoint::new(
-                        Arc::new(|_| Box::pin(async move { EmptyResolution::new(200) })),
-                        None,
-                    ),
+                    EndPoint::new(resolve!(_req, { EmptyResolution::new(200) }), None),
                 )),
             )
             .await;
@@ -112,20 +174,5 @@ mod tests {
             found_var_route.is_some(),
             "/test/{left_id}/{right_id} (a valid route) was missing from the router."
         );
-    }
-
-    #[tokio::test]
-    async fn test_bind() {
-        let local_app_bind = create_local_app().await;
-
-        assert!(
-            local_app_bind.is_ok(),
-            "failed to bind application {:?}",
-            local_app_bind.err()
-        );
-
-        let app = Arc::new(local_app_bind.unwrap());
-
-        drop(app);
     }
 }

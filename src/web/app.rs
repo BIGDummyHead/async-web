@@ -370,12 +370,7 @@ impl App {
     }
 }
 
-#[macro_export]
-macro_rules! route {
-    ($req:ident, $body:expr) => {
-        Arc::new(|$req| Box::pin(async move { $body }) )
-    };
-}
+
 
 impl App {
     /// Adds a new route or replaces an existing route’s resolution for the given method.
