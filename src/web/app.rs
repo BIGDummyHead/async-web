@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use futures::StreamExt;
 use tokio::{
@@ -117,8 +117,8 @@ impl App {
     ///
     /// Returns an error if the stream cannot be read or the request is malformed.
 
-    async fn process_acception(mut stream: &mut TcpStream) -> Result<Request, std::io::Error> {
-        let request_result = Request::parse_request(&mut stream).await;
+    async fn process_acception(mut stream: &mut TcpStream, connected_socket: SocketAddr) -> Result<Request, std::io::Error> {
+        let request_result = Request::parse_request(&mut stream, connected_socket).await;
 
         if let Err(e) = request_result {
             return Err(e);
@@ -188,21 +188,19 @@ impl App {
 
         task::spawn(async move {
             loop {
-                let client_result = listener.accept().await;
+                let accepted_client = listener.accept().await;
 
-                if let Err(c_err) = client_result {
+                if let Err(c_err) = accepted_client {
                     eprintln!("Failed to connect client: {c_err}");
                     continue;
                 }
-
-                let (stream, _) = client_result.unwrap();
 
                 let router_ref = router.clone();
                 let middleware_ref = global_middleware.clone();
 
                 work_manager
                     .add_work(Box::pin(async move {
-                        Self::request_work(stream, middleware_ref, router_ref).await;
+                        Self::request_work(accepted_client.unwrap(), middleware_ref, router_ref).await;
                     }))
                     .await;
             }
@@ -221,12 +219,16 @@ impl App {
     /// Errors during processing terminate handling for the request.
 
     async fn request_work(
-        mut stream: TcpStream,
+        client: (TcpStream, SocketAddr),
         global_middleware: Arc<Mutex<Vec<MiddlewareClosure>>>,
         router_ref: Arc<Mutex<RouteTree>>,
     ) -> () {
+
+        let mut stream = client.0;
+        let client_socket = client.1;
+
         //process the acception and get the result from the stream
-        let req_result = Self::process_acception(&mut stream).await;
+        let req_result = Self::process_acception(&mut stream, client_socket).await;
 
         if let Err(e) = req_result {
             eprintln!("Error in processing request: {}", e);

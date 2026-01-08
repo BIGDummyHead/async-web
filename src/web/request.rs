@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, net::SocketAddr};
 
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
@@ -29,11 +29,14 @@ pub struct Request {
 
     /// Body of the request.
     pub body: Vec<u8>,
+
+    /// The connected socket of the client
+    pub client_socket: SocketAddr
 }
 
 impl Request {
     /// Parse a tcp stream request and gives back the Request
-    pub async fn parse_request(stream: &mut TcpStream) -> Result<Self, std::io::Error> {
+    pub async fn parse_request(stream: &mut TcpStream, client_socket: SocketAddr) -> Result<Self, std::io::Error> {
         //create a buffer that will read each line
         let mut reader = BufReader::new(stream);
 
@@ -119,6 +122,7 @@ impl Request {
             headers,
             body,
             variables: HashMap::new(),
+            client_socket
         })
     }
 }
