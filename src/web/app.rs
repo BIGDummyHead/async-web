@@ -368,7 +368,7 @@ impl App {
     }
 }
 
-/// ## route!
+/// ## resolve!
 ///
 /// Shorthand for writing a route resolver!
 ///
@@ -396,7 +396,7 @@ impl App {
 /// ```
 ///
 ///     //create a route that throws an internal error
-///     let r = route!(req, {
+///     let r = resolve!(req, {
 ///         EmptyResolution::new(500)
 ///     });
 ///
@@ -408,7 +408,7 @@ impl App {
 ///
 /// ### Short Hand Capture (with macro)
 ///
-/// Suppose you want to move a value from the program into the route, but you cannot with the basic `route!(req, { res })` macro.
+/// Suppose you want to move a value from the program into the route, but you cannot with the basic `resolve!(req, { res })` macro.
 ///
 /// `Note: this clones each moved value`
 ///
@@ -422,7 +422,7 @@ impl App {
 ///     let omv_clone = outter_mut_var.clone();
 ///
 ///     //this route throws an internal error and moves the omv_clone variable
-///     let r = route!(req, moves[omv_clone], {
+///     let r = resolve!(req, moves[omv_clone], {
 ///         
 ///         let count = omv_clone.lock().await;
 ///         *count += 1;
@@ -439,7 +439,7 @@ impl App {
 ///
 ///
 #[macro_export]
-macro_rules! route {
+macro_rules! resolve {
 
     ($req: ident, moves[$($cap:ident),*], $body:block) => {
 
@@ -453,7 +453,7 @@ macro_rules! route {
     };
 
     ($req:ident, $body:block) => {
-        route!($req, moves[], $body)
+        resolve!($req, moves[], $body)
     };
 }
 
@@ -461,7 +461,7 @@ macro_rules! route {
 /// 
 /// This macro is responsible for giving you the ability to write middleware via shorthand. 
 /// 
-/// It works in the same fashion as route!, giving you the ability (and option) to capture elements around the function.
+/// It works in the same fashion as resolve!, giving you the ability (and option) to capture elements around the function.
 /// 
 /// ### Example "long"-hand
 /// For example, if we want some middleware applied to a route it may look like this:

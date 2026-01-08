@@ -13,7 +13,7 @@ mod tests {
     use tokio::sync::Mutex;
 
     use crate::{
-        middleware, route, web::{
+        middleware, resolve, web::{
             App, EndPoint, Method, Middleware, resolution::empty_resolution::EmptyResolution, router::RouteTree
         }
     };
@@ -45,7 +45,7 @@ mod tests {
             "/test/this",
             Method::GET,
             None,
-            route!(req, {
+            resolve!(req, {
                 let req = req.lock().await;
 
                 println!("Request for: {}", req.method);
@@ -63,7 +63,7 @@ mod tests {
             "/test/this",
             Method::PATCH,
             None,
-            route!(req, moves[counter_ref], {
+            resolve!(req, moves[counter_ref], {
                 let req = req.lock().await;
 
                 println!("Request for: {}", req.method);
@@ -95,7 +95,7 @@ mod tests {
             "/test/this/middleware",
             Method::GET,
             m_collect,
-            route!(_req, { EmptyResolution::new(200) }),
+            resolve!(_req, { EmptyResolution::new(200) }),
         )
         .await;
 
@@ -126,7 +126,7 @@ mod tests {
                 "",
                 Some((
                     Method::GET,
-                    EndPoint::new(route!(_req, { EmptyResolution::new(200) }), None),
+                    EndPoint::new(resolve!(_req, { EmptyResolution::new(200) }), None),
                 )),
             )
             .await;
@@ -136,7 +136,7 @@ mod tests {
                 "/test",
                 Some((
                     Method::GET,
-                    EndPoint::new(route!(_req, { EmptyResolution::new(200) }), None),
+                    EndPoint::new(resolve!(_req, { EmptyResolution::new(200) }), None),
                 )),
             )
             .await;
@@ -146,7 +146,7 @@ mod tests {
                 "/test/{user_id}/{name}",
                 Some((
                     Method::GET,
-                    EndPoint::new(route!(_req, { EmptyResolution::new(200) }), None),
+                    EndPoint::new(resolve!(_req, { EmptyResolution::new(200) }), None),
                 )),
             )
             .await;
