@@ -156,7 +156,6 @@ You probably also have questions about other things like:
 * Moving values between `resolve!` and `middleware!`
 * What else can routes return?
 * How does one use variables in their route?
-* What is the req variable in `resolve!` and `middleware`
 * How can I create a custom Resulition?
 
 These will all be covered, but for now let's focus on starting this app.
@@ -175,3 +174,172 @@ let _ = app_thread.await;
 ```
 
 ### More examples to come...
+
+## Moving Values 
+
+Sometimes we need to move and clones values from one scope to another. However you cannot do this without using the `moves` variable in the `middleware!` and `resolve!` macro.
+
+```rust
+
+//this example of moves would work for both middleware!/resolve!
+
+let moved_value = Arc::new(String::from("Test"));
+let other_moved_value = Arc::new(String::from("Test"));
+
+app.add_or_panic(
+    "/admin/home",
+    Method::POST, //note that we are using a different method
+    None,
+    resolve!(req, moves[moved_value, other_moved_value] {
+        //it is important to note that moved_value/other_moved_value ARE moved however, they are also cloned. 
+        EmptyResolution::new(200)
+    }),
+    )
+    .await;
+
+```
+
+## Resolving a Route
+
+You may have noticed that `route!` in all the examples use the `EmptyResolution::new(200)` value. Meaning to tell the request 200 (ok) with no content.
+
+However, we use other pre-made resolutions in the library such as:
+
+* FileTextResolution::new(&str) -> resolved into raw `utf8` text.
+* FileResolution::new(String) -> resolved into `Vec<u8>` and sets appropriate headers.
+* EmptyResolution::new(i32) -> resolves into an empty resolution with the appropriate status header.
+* JsonResolution::new<T>(T) -> Result<Self, serde_json::Error>. This does not directly resolve into a resolution. You must call `into_resolution` 
+
+Each of these pre-included resolutions implement the `Resolution` trait. This trait includes 2 functions to implement:
+
+* `fn get_headers(&self) -> Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>>`
+* `fn get_content(&self) ->  Pin<Box<dyn Stream<Item = Vec<u8>> + Send + 'static>>`
+
+### Creating a Resolution
+
+Creating a resolution is rather simple. Below is a "StreamedResolution" example. 
+
+Below you will find an example in which we take a receiver, receive data from it, and yield it to the resolution.
+
+
+```rust
+
+// Using tokio (with features 'full') and tokio_stream
+use std::sync::Arc;
+
+use async_stream::stream;
+use async_web::web::{Resolution, resolution::get_status_header};
+use tokio::sync::{Mutex, broadcast::Receiver};
+
+// Struct that includes an Async Safe Mutatable Receiver (tokio::sync::broadcast) of compressed framed data
+pub struct StreamedResolution {
+    rx:  Arc<Mutex<Receiver<Vec<u8>>>>,
+}
+
+impl StreamedResolution {
+    /// Pass the receiver subscription into the StreamResolution structure.
+    /// Returns the instance of the resolution trait boxed.
+    pub fn new(rx: Receiver<Vec<u8>>) -> Box<dyn Resolution + Send> {
+        let res = Self { rx: Arc::new(Mutex::new(rx)) };
+        Box::new(res)
+    }
+}
+
+/// Resolution implementation for StreamedResolution
+impl Resolution for StreamedResolution {
+
+    // Get Headers
+    // Headers to send to the requester. This fortunately will always be 200.
+    fn get_headers(&self) -> std::pin::Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>> {
+        //Box and pin the function that returns the single status header string.
+        Box::pin(async move { vec![get_status_header(200)] })
+    }
+
+    /// Get Content
+    /// Content function that will be invoked to get the streamed data.
+    fn get_content(&self) -> std::pin::Pin<Box<dyn futures::Stream<Item = Vec<u8>> + Send>> {
+
+        //create a clone of the receiver 
+        let rx = self.rx.clone();
+
+        // stream! macro from tokio_stream
+        let content_stream = stream! {
+    
+            //loop to yield compressed data from the receiver.
+            loop {
+
+                //lock the receiver guard, recv the data and drop 
+                let data = {
+                    let mut guard = rx.lock().await;
+                    guard.recv().await
+                };
+
+                //possible error from compression, okay to continue
+                if data.is_err() {
+                    continue;
+                }
+
+                let data = data.unwrap();
+
+                //yield our unpacked data.
+                yield data;
+
+            }
+        };
+
+        //pin our stream.
+        Box::pin(content_stream)
+    }
+}
+
+```
+
+#### Using our new Resolution
+
+```rust
+
+    //clone our broadcaster
+    let compressed_frame_rx_clone = compressed_frame_rx.clone();
+
+    //streamed POST for the content of the device
+    app.add_or_panic(
+        "/stream", //path
+        Method::POST,
+        None,
+        resolve!(_req, moves[compressed_frame_rx_clone], {
+
+            //create a receiver we can pass to the streamed resolution
+            let rx = compressed_frame_rx_clone.subscribe();
+
+            //return our new resolution
+            StreamedResolution::new(rx)
+        }),
+    )
+    .await;
+```
+
+Our frontend code (JavaScript) may look like this:
+
+```js
+
+async function readStream() {
+
+    //fetch our stream
+    const response = await fetch("/stream", { method: "POST" });
+
+    //get the body reader
+    const reader = response.body.getReader();
+
+    //keep reading until done
+    while (true) {
+        
+        const { value, done } = await reader.read();
+
+        if (done)
+            break;
+
+        --snip--
+    }
+}
+```
+
