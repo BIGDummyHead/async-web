@@ -1,4 +1,5 @@
 pub mod web;
+pub mod factory;
 
 #[cfg(test)]
 mod tests {

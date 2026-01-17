@@ -1,12 +1,11 @@
 pub mod app;
 pub mod errors;
-pub mod factory;
 pub mod resolution;
 pub mod routing;
 pub mod streams;
 
 pub use self::{
-    app::App, factory::queue::Queue, factory::work_manager::WorkManager, factory::worker::Worker,
+    app::App,
     resolution::Resolution, routing::method::Method, routing::middleware::Middleware,
     routing::request::Request, routing::route::Route, routing::router::endpoint::EndPoint,
 };

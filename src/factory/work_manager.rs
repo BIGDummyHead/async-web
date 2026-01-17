@@ -8,8 +8,7 @@ use tokio::{
     }
 };
 
-use crate::web::{Queue, Worker};
-
+use crate::factory::{Queue, Worker};
 
 /// Represents a distrubutor of work.
 pub struct WorkManager<R>
