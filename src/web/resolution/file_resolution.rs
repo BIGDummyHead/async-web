@@ -1,34 +1,32 @@
-use futures::{Stream, stream};
-use tokio::{fs, io::AsyncReadExt};
+use futures::Stream;
 
-use crate::web::{Resolution, resolution::{empty_content, get_status_header}};
+use crate::web::{Resolution, resolution::get_status_header, streams::stream_file};
 
 /// # File Resolution
 ///
 /// Resolution that gives you the ability to serve files as an array of bytes.
-/// 
+///
 /// This is useful for a content folder where you need to serve non-text based files.
-/// 
+///
 /// ## Example
-/// 
+///
 /// ```
 ///  let file_resolution = FileResolution::new("/images/profile_image.png".to_string());
-/// ``` 
-/// 
+/// ```
+///
 /// The content type of the file is determined based on the extension, this header is passed via the Resolution::get_headers function.
-/// 
+///
 /// The status of the file is determined based on if the file exist.
-/// 
+///
 /// If the file `exist` than the status is `200`
-/// 
+///
 /// If the file `does not exist` than the status is `404`
-/// 
+///
 pub struct FileResolution {
     pub file_path: String,
 }
 
 impl FileResolution {
-
     pub fn new(file_path: String) -> Box<dyn super::Resolution + Send> {
         let res = Self { file_path };
 
@@ -103,32 +101,17 @@ impl FileResolution {
 
 impl Resolution for FileResolution {
     fn get_headers(&self) -> std::pin::Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>> {
-        Box::pin(async move { vec![get_status_header(self.get_status()), self.get_file_type_header()] })
+        Box::pin(async move {
+            vec![
+                get_status_header(self.get_status()),
+                self.get_file_type_header(),
+            ]
+        })
     }
 
     fn get_content(&self) -> std::pin::Pin<Box<dyn Stream<Item = Vec<u8>> + Send + 'static>> {
         let file_path = self.file_path.clone();
-        Box::pin(stream::once(async move {
-            let path = std::path::Path::new(&file_path);
-            if !path.exists() {
-                return empty_content();
-            }
 
-            let file_open = fs::File::open(&file_path).await;
-
-            if file_open.is_err() {
-                return empty_content();
-            }
-
-            let mut file = file_open.unwrap();
-
-            let mut buffer = Vec::new();
-
-            if let Err(e) = file.read_to_end(&mut buffer).await {
-                todo!("Failed to read to end: {e}");
-            }
-
-            buffer
-        }))
+        Box::pin(stream_file(file_path))
     }
 }

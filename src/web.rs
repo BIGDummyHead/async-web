@@ -10,6 +10,7 @@ pub mod route;
 pub mod router;
 pub mod work_manager;
 pub mod worker;
+pub mod streams;
 
 pub use self::{
     app::App, endpoint::EndPoint, method::Method, middleware::Middleware, queue::Queue,
