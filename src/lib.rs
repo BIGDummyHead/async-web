@@ -1,4 +1,5 @@
 pub mod web;
+pub mod factory;
 
 #[cfg(test)]
 mod tests {
@@ -14,7 +15,7 @@ mod tests {
 
     use crate::{
         middleware, resolve, web::{
-            App, EndPoint, Method, Middleware, resolution::empty_resolution::EmptyResolution, router::RouteTree
+            App, EndPoint, Method, Middleware, resolution::empty_resolution::EmptyResolution, routing::router::route_tree::RouteTree
         }
     };
 

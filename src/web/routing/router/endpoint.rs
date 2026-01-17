@@ -1,4 +1,5 @@
-use crate::web::{middleware::MiddlewareCollection, router::ResolutionFunc};
+use crate::web::routing::{ResolutionFunc, middleware::MiddlewareCollection};
+
 
 /// ## End Point
 /// Represents an Endpoint of a Route Tree node. 

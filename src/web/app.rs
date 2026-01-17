@@ -8,12 +8,17 @@ use tokio::{
     task::{self, JoinHandle},
 };
 
+use crate::factory::WorkManager;
+
 use crate::web::{
-    EndPoint, Method, Middleware, Request, Resolution, WorkManager,
+    EndPoint, Method, Middleware, Request, Resolution,
     errors::{RoutingError, routing_error::RoutingErrorType},
-    middleware::{MiddlewareClosure, MiddlewareCollection},
     resolution::empty_resolution::EmptyResolution,
-    router::{ResolutionFunc, RouteNodeRef, RouteTree},
+    routing::{
+        ResolutionFunc, RouteNodeRef,
+        middleware::{MiddlewareClosure, MiddlewareCollection},
+        router::route_tree::RouteTree,
+    },
 };
 
 /// # App
@@ -117,7 +122,10 @@ impl App {
     ///
     /// Returns an error if the stream cannot be read or the request is malformed.
 
-    async fn process_acception(mut stream: &mut TcpStream, connected_socket: SocketAddr) -> Result<Request, std::io::Error> {
+    async fn process_acception(
+        mut stream: &mut TcpStream,
+        connected_socket: SocketAddr,
+    ) -> Result<Request, std::io::Error> {
         let request_result = Request::parse_request(&mut stream, connected_socket).await;
 
         if let Err(e) = request_result {
@@ -200,7 +208,8 @@ impl App {
 
                 work_manager
                     .add_work(Box::pin(async move {
-                        Self::request_work(accepted_client.unwrap(), middleware_ref, router_ref).await;
+                        Self::request_work(accepted_client.unwrap(), middleware_ref, router_ref)
+                            .await;
                     }))
                     .await;
             }
@@ -223,7 +232,6 @@ impl App {
         global_middleware: Arc<Mutex<Vec<MiddlewareClosure>>>,
         router_ref: Arc<Mutex<RouteTree>>,
     ) -> () {
-
         let mut stream = client.0;
         let client_socket = client.1;
 
@@ -369,8 +377,6 @@ impl App {
         Ok(())
     }
 }
-
-
 
 impl App {
     /// Adds a new route or replaces an existing route’s resolution for the given method.

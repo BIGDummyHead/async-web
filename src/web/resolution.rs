@@ -1,9 +1,9 @@
 use futures::Stream;
 use std::pin::Pin;
+use async_stream::stream;
 
 pub mod empty_resolution;
 pub mod file_resolution;
-pub mod file_text_resolution;
 pub mod json_resolution;
 
 /// Represents a resolution for a request
@@ -133,4 +133,13 @@ pub fn get_status_header(status_code: i32) -> String {
 /// ```
 pub fn empty_content() -> Vec<u8> {
     Vec::new()
+}
+
+
+pub async fn streamed_empty_content() ->  Pin<Box<dyn Stream<Item = Vec<u8>> + Send + 'static>> {
+    let stream_result = stream! {
+        yield Vec::<u8>::new();
+    };
+
+    Box::pin(stream_result)
 }

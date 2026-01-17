@@ -7,7 +7,9 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::web::{Queue, errors::{WorkerError, worker_error::WorkerErrorType}};
+use crate::web::{errors::{WorkerError, worker_error::WorkerErrorType}};
+
+use crate::factory::Queue;
 
 /// Represents an individual worker that is able to complete some form of 'work' and return it back to a manager.
 pub struct Worker<R>

@@ -2,7 +2,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use tokio::sync::Mutex;
 
-use crate::web::{EndPoint, Method, router::RouteNodeRef};
+use crate::web::{EndPoint, Method};
+use crate::web::routing::RouteNodeRef;
 
 pub struct RouteNode {
     // The ID of the node, usually part of a larger string. Ex. api/admin/users -> ID's may be (api, admin, users)
