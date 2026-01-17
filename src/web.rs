@@ -1,21 +1,14 @@
 pub mod app;
-pub mod endpoint;
 pub mod errors;
-pub mod method;
-pub mod middleware;
-pub mod queue;
-pub mod request;
+pub mod factory;
 pub mod resolution;
-pub mod route;
-pub mod router;
-pub mod work_manager;
-pub mod worker;
+pub mod routing;
 pub mod streams;
 
 pub use self::{
-    app::App, endpoint::EndPoint, method::Method, middleware::Middleware, queue::Queue,
-    request::Request, resolution::Resolution, route::Route, work_manager::WorkManager,
-    worker::Worker
+    app::App, factory::queue::Queue, factory::work_manager::WorkManager, factory::worker::Worker,
+    resolution::Resolution, routing::method::Method, routing::middleware::Middleware,
+    routing::request::Request, routing::route::Route, routing::router::endpoint::EndPoint,
 };
 
 /// ## resolve!

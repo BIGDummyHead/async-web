@@ -1,9 +1,11 @@
 use futures::Stream;
 use std::pin::Pin;
+use async_stream::stream;
+
 pub mod empty_resolution;
 pub mod file_resolution;
 pub mod json_resolution;
-use async_stream::stream;
+
 /// Represents a resolution for a request
 pub trait Resolution {
     ///

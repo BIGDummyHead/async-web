@@ -9,11 +9,8 @@ use tokio::{
 };
 
 use crate::web::{
-    EndPoint, Method, Middleware, Request, Resolution, WorkManager,
-    errors::{RoutingError, routing_error::RoutingErrorType},
-    middleware::{MiddlewareClosure, MiddlewareCollection},
-    resolution::empty_resolution::EmptyResolution,
-    router::{ResolutionFunc, RouteNodeRef, RouteTree},
+    EndPoint, Method, Middleware, Request, Resolution, WorkManager, errors::{RoutingError, routing_error::RoutingErrorType}, resolution::empty_resolution::EmptyResolution, routing::{ResolutionFunc, RouteNodeRef, middleware::{MiddlewareClosure, MiddlewareCollection}, router::route_tree::RouteTree}
+    
 };
 
 /// # App
