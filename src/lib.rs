@@ -48,13 +48,15 @@ mod tests {
             "/test/this",
             Method::GET,
             None,
-            resolve!(req, {
-                let req = req.lock().await;
+            resolve!(_eq, { EmptyResolution::new(200) }),
+        )
+        .await;
 
-                println!("Request for: {}", req.method);
-
-                EmptyResolution::new(200)
-            }),
+    app.add_or_panic(
+            "/test/asdx/{name}",
+            Method::GET,
+            None,
+            resolve!(_req, { EmptyResolution::new(200) }),
         )
         .await;
 
@@ -76,6 +78,20 @@ mod tests {
                     *times_called += 1;
                     println!("Request called {} times", *times_called);
                 }
+
+                EmptyResolution::new(200)
+            }),
+        )
+        .await;
+
+        app.add_or_panic(
+            "/test/wild/{*}",
+            Method::GET,
+            None,
+            resolve!(req, {
+                let req = req.lock().await;
+
+                println!("Request for: {}", req.variables.get("*").unwrap());
 
                 EmptyResolution::new(200)
             }),
@@ -117,6 +133,8 @@ mod tests {
             route_lock.brw_resolution(&Method::PATCH).is_some(),
             "Missing PATCH method"
         );
+
+        drop(route_lock);
     }
 
     #[tokio::test]
@@ -204,7 +222,11 @@ mod tests {
 
         assert!(wild_card.is_ok(), "Wild card was invalid route.");
 
-        let test_routes = vec!["/wild/test/test/test/test", "/wild/test/test/test/test/wild/test/test/test/test/wild/test/test/test/test/wild/test/test/test/test", "/wild/test"];
+        let test_routes = vec![
+            "/wild/test/test/test/test",
+            "/wild/test/test/test/test/wild/test/test/test/test/wild/test/test/test/test/wild/test/test/test/test",
+            "/wild/test",
+        ];
 
         let mut futs = vec![];
         for test in test_routes {
@@ -221,7 +243,11 @@ mod tests {
 
             let resolve = route_lock.brw_resolution(&Method::GET);
 
-            assert!(resolve.is_some(), "Resolve was missing for: {}", route_lock.id);
+            assert!(
+                resolve.is_some(),
+                "Resolve was missing for: {}",
+                route_lock.id
+            );
         }
 
         let route = router.get_route("/wild/asd").await;

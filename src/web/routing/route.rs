@@ -82,6 +82,8 @@ impl Route {
             }
         }
 
+        cleaned_route = cleaned_route.trim_end().to_string();
+
         Self {
             params: parsed,
             init_route,

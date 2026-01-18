@@ -143,40 +143,79 @@ impl App {
     /// This is executed after routing but before middleware and resolution execution.
 
     async fn set_request_variables(req_ref: Arc<Mutex<Request>>, route_ref: RouteNodeRef) -> () {
-        let route_parts: Vec<String> = req_ref
-            .lock()
-            .await
-            .route
-            .cleaned_route
-            .split('/')
-            .rev()
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .collect();
+        //the given route by the user, cleaned.
+        let given_route: String = {
+            let req_lock = req_ref.lock().await;
 
-        let mut current_node = Some(route_ref);
+            req_lock.route.cleaned_route.clone()
+        };
 
-        // the value given here is from the route, so it is the value the user provided
-        for value in route_parts {
-            // we are done searching here
-            let node_ref = match current_node {
-                Some(n) => n,
-                None => break,
-            };
+        let mut given_route_parts: Vec<&str> = given_route.split('/').rev().collect();
 
-            let node = node_ref.lock().await;
+        let mut current_ref = Some(route_ref.clone());
 
-            if node.is_var {
-                let mut id = node.id.clone();
+        //used for wildcard matches.
+        let mut skip = 1;
+
+        while let Some(c_ref) = current_ref {
+            
+            //pop a route part
+            let route_part = given_route_parts.pop();
+
+            //if none, something is wrong, break out
+            if route_part.is_none() {
+                break;
+            }
+
+            //unwrap the route part
+            let route_part = route_part.unwrap();
+
+            //check if the route part is empty, we are allowed to continue from this
+            if route_part.is_empty() {
+                //since we own c_ref and have not locked, we can just reuse.
+                //we need to pass into some for ownership
+                current_ref = Some(c_ref);
+                continue;
+            }
+
+            //lock for checks
+            let c_ref_lock = c_ref.lock().await;
+
+            if c_ref_lock.is_var {
+                println!("Route Part: {route_part}");
+
+                //clean the ID from {name} -> name
+                let mut id = c_ref_lock.id.clone();
                 id.remove(0);
                 id.remove(id.len() - 1);
 
+                let is_wild = id.eq("*");
+
+                let value = if is_wild {
+                    let value = given_route_parts
+                        .iter()
+                        .rev()
+                        .skip(skip + 1)
+                        .copied()
+                        .collect::<Vec<&str>>()
+                        .join("/");
+
+                    value
+                } else {
+                    route_part.to_string()
+                };
+
+                println!("ID/VALUE: {id}/{value}");
                 req_ref.lock().await.variables.insert(id, value);
+
+                if is_wild {
+                    break;
+                }
             }
 
-            let next_node = node.parent.clone();
+            current_ref = c_ref_lock.parent.clone();
 
-            current_node = next_node;
+            skip += 1;
         }
     }
 
@@ -266,7 +305,6 @@ impl App {
                 Some(r) => {
                     // This no longer deadlocks because the lock was dropped above
                     Self::set_request_variables(request.clone(), r.clone()).await;
-
                     let route_lock = r.lock().await;
                     route_lock.brw_resolution(&method).clone()
                 }
