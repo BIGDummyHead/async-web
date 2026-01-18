@@ -5,6 +5,16 @@ use tokio::sync::Mutex;
 use crate::web::{EndPoint, Method};
 use crate::web::routing::RouteNodeRef;
 
+/// # Is Variable Id
+/// 
+/// Takes a reference to a string and checks for a pattern on the string that:
+/// 
+/// true -> when the ID is of a variable type
+/// false -> when the ID is not of a variable type
+fn is_variable_id(id: &String) -> bool {
+    id.starts_with("{") && id.ends_with("}")
+}
+
 pub struct RouteNode {
     // The ID of the node, usually part of a larger string. Ex. api/admin/users -> ID's may be (api, admin, users)
     pub id: String,
@@ -30,7 +40,10 @@ pub struct RouteNode {
 
 /// A node from a Route Tree
 impl RouteNode {
-    /// Create a new node, simply takes an ID (part of a url) and an optional resolution.
+    
+    /// # New
+    /// 
+    /// Creates a new route node struct, takes an ID (part of a URL), takes a Optional Method and Endpoint tuple.
     pub fn new(id: String, resolution: Option<(Method, EndPoint)>) -> Self {
         let mut resolutions = HashMap::new();
 
@@ -38,7 +51,8 @@ impl RouteNode {
             resolutions.insert(method, Arc::new(end_point));
         }
 
-        let is_var = id.starts_with("{") && id.ends_with("}");
+        let is_var = is_variable_id(&id);
+
         Self {
             id,
             resolutions,
@@ -49,41 +63,61 @@ impl RouteNode {
         }
     }
 
-    /// Borrow the current resolution for a method.
-    pub fn get_resolution(&self, method: &Method) -> Option<Arc<EndPoint>> {
-        match self.resolutions.get(method) {
-            None => None,
-            Some(v) => Some(v.clone())
-        }
+    /// # Borrow Resolution
+    /// 
+    /// Borrows a resolution from the resolutions map.
+    /// 
+    /// None -> if the resolution for the given method does not exist.
+    /// 
+    /// Some -> If the resolution exist for the given method. Clones the Arc
+    pub fn brw_resolution(&self, method: &Method) -> Option<Arc<EndPoint>> {
+        self.resolutions.get(method).map(|r| r.clone())
     }
 
-    /// Borrow a child of the node. None if not present.
-    pub fn get_child(&self, id: &str) -> Option<RouteNodeRef> {
+    /// # Borrow Child
+    /// 
+    /// Borrows a child from the route node ref 
+    /// 
+    /// None -> If the child does not exist
+    /// 
+    /// Some -> If the child with the ID exist.
+    pub fn brw_child(&self, id: &str) -> Option<RouteNodeRef> {
         self.children.get(id).cloned()
     }
 
-    /// Insert a resolution for the node. Replaces the current resolution for the method if it already exist.
+    /// # Insert Resolution
+    /// 
+    /// Inserts a resolution to an existing route node.
     pub fn insert_resolution(&mut self, method: Method, endpoint: EndPoint) -> () {
         self.resolutions.insert(method, Arc::new(endpoint));
     }
 
-    /// Add a child to this node. Same as using the new function but directly adds to this node.
+    /// # Add Child
+    /// 
+    /// Takes the parent reference node, has an ID for the route name, and an optional endpoint.
+    /// 
+    /// This directly adds the node to the parent reference. 
     pub async fn add_child(
         parent_ref: RouteNodeRef,
         id: String,
         endpoint: Option<(Method, EndPoint)>,
     ) -> RouteNodeRef {
-        let mut parent = parent_ref.lock().await;
 
+        //create a new node
         let mut node = Self::new(id.clone(), endpoint);
         node.parent = Some(parent_ref.clone());
 
+        //create a new ARC for the node with mutex wrapper. 
+        //immediately clone it for the children
         let node_ref = Arc::new(Mutex::new(node));
+        let node_ref_clone = node_ref.clone();
 
-        if id.starts_with("{") && id.ends_with("}") {
-            parent.var_child = Some(node_ref.clone());
+        let mut parent = parent_ref.lock().await;
+
+        if is_variable_id(&id) {
+            parent.var_child = Some(node_ref_clone);
         } else {
-            parent.children.insert(id.clone(), node_ref.clone());
+            parent.children.insert(id, node_ref_clone);
         }
 
         return node_ref;

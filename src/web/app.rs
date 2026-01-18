@@ -268,12 +268,12 @@ impl App {
                     Self::set_request_variables(request.clone(), r.clone()).await;
 
                     let route_lock = r.lock().await;
-                    route_lock.get_resolution(&method).clone()
+                    route_lock.brw_resolution(&method).clone()
                 }
                 None => binding
                     .missing_route
                     .as_ref()
-                    .and_then(|mr| mr.get_resolution(&Method::GET))
+                    .and_then(|mr| mr.brw_resolution(&Method::GET))
                     .clone(),
             }
         };
@@ -419,7 +419,7 @@ impl App {
         let pos_route = router.get_route(route).await;
 
         if let Some(r) = pos_route {
-            if r.lock().await.get_resolution(&method).is_some() {
+            if r.lock().await.brw_resolution(&method).is_some() {
                 return Err(RoutingError::new(RoutingErrorType::Exist));
             }
         }

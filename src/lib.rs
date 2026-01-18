@@ -1,5 +1,5 @@
-pub mod web;
 pub mod factory;
+pub mod web;
 
 #[cfg(test)]
 mod tests {
@@ -10,13 +10,15 @@ mod tests {
         sync::Arc,
     };
 
-
+    use futures::future::join_all;
     use tokio::sync::Mutex;
 
     use crate::{
-        middleware, resolve, web::{
-            App, EndPoint, Method, Middleware, resolution::empty_resolution::EmptyResolution, routing::router::route_tree::RouteTree
-        }
+        middleware, resolve,
+        web::{
+            App, EndPoint, Method, Middleware, resolution::empty_resolution::EmptyResolution,
+            routing::router::route_tree::RouteTree,
+        },
     };
 
     /// Can be used for other test to create a bind on the local machine.
@@ -108,18 +110,17 @@ mod tests {
         let route_lock = r.lock().await;
 
         assert!(
-            route_lock.get_resolution(&Method::GET).is_some(),
+            route_lock.brw_resolution(&Method::GET).is_some(),
             "Missing GET method"
         );
         assert!(
-            route_lock.get_resolution(&Method::PATCH).is_some(),
+            route_lock.brw_resolution(&Method::PATCH).is_some(),
             "Missing PATCH method"
         );
-
     }
 
     #[tokio::test]
-    async fn create_router() {
+    async fn basic_routing() {
         let mut router = RouteTree::new(None);
 
         let bad_route = router
@@ -175,5 +176,64 @@ mod tests {
             found_var_route.is_some(),
             "/test/{left_id}/{right_id} (a valid route) was missing from the router."
         );
+    }
+
+    #[tokio::test]
+    async fn wild_card_routing() {
+        let mut router = RouteTree::new(None);
+
+        let wild_card = router
+            .add_route(
+                "/wild/{*}",
+                Some((
+                    Method::GET,
+                    EndPoint::new(resolve!(_req, { EmptyResolution::new(200) }), None),
+                )),
+            )
+            .await;
+
+        let _ = router
+            .add_route(
+                "/wild/asd",
+                Some((
+                    Method::POST,
+                    EndPoint::new(resolve!(_req, { EmptyResolution::new(200) }), None),
+                )),
+            )
+            .await;
+
+        assert!(wild_card.is_ok(), "Wild card was invalid route.");
+
+        let test_routes = vec!["/wild/test/test/test/test", "/wild/test/test/test/test/wild/test/test/test/test/wild/test/test/test/test/wild/test/test/test/test", "/wild/test"];
+
+        let mut futs = vec![];
+        for test in test_routes {
+            futs.push(router.get_route(test));
+        }
+        let routes = join_all(futs).await;
+
+        for route in routes {
+            assert!(route.is_some());
+
+            let route = route.unwrap();
+
+            let route_lock = route.lock().await;
+
+            let resolve = route_lock.brw_resolution(&Method::GET);
+
+            assert!(resolve.is_some(), "Resolve was missing for: {}", route_lock.id);
+        }
+
+        let route = router.get_route("/wild/asd").await;
+
+        assert!(route.is_some());
+
+        let route = route.unwrap();
+
+        let route = route.lock().await;
+
+        let route_post = route.brw_resolution(&Method::POST);
+
+        assert!(route_post.is_some());
     }
 }

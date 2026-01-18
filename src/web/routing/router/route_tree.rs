@@ -100,6 +100,8 @@ impl RouteTree {
 
         let root = self.root.clone();
 
+        let mut end_point = end_point;
+
         if route == "/" {
             if let Some((m, r)) = end_point {
                 root.lock().await.insert_resolution(m, r);
@@ -116,25 +118,32 @@ impl RouteTree {
 
         let mut node = root;
 
-        while let Some(rte) = route_parts.next() {
-            if rte.is_empty() {
+        while let Some(rte_part) = route_parts.next() {
+            if rte_part.is_empty() {
                 continue;
             }
 
-            let route_part = rte.to_string();
-
+            //checks if this the last element in the iteration
             let is_last = route_parts.peek().is_none();
 
-            //there is a child on this node and it is the last add it
-            if node.lock().await.children.contains_key(&route_part) {
+            //checks if the node has a child for the rte_part
+            let has_child = {
+                let node_lock = node.lock().await;
+                node_lock.children.contains_key(rte_part)
+            };
+
+            //check if the child on this route exist.
+            if has_child {
+                //clone the nnode values
                 let node_clone = node.clone();
                 let brw_node = node_clone.lock().await;
 
-                //insert the resolution since it exists
+                //omsert the endpoint to the route, then return ok(), since this is the last item
                 if is_last {
+                    //check if there is an endpoint to add
                     if let Some((m, r)) = end_point {
                         brw_node
-                            .get_child(&route_part)
+                            .brw_child(rte_part)
                             .unwrap()
                             .lock()
                             .await
@@ -143,19 +152,31 @@ impl RouteTree {
                     return Ok(());
                 }
 
-                let child = brw_node.get_child(&route_part).unwrap();
+                //if not the last, brw the child and clone for next iteration
+                let child = brw_node.brw_child(rte_part).unwrap();
                 node = child.clone();
-            } else {
-                //there is no child, we must now add it to the current node
-                if is_last {
-                    RouteNode::add_child(node.clone(), route_part, end_point).await;
-                    return Ok(());
-                }
 
-                let added = RouteNode::add_child(node.clone(), route_part, None).await;
-
-                node = added;
+                continue;
             }
+
+            //get element for adding.
+            let rte_str = rte_part.to_string();
+            let node_clone = node.clone();
+
+            // gets the endpoint if is last and the endpoint is some
+            let end_point = if is_last { end_point.take() } else { None };
+
+            //add the route
+            let added = RouteNode::add_child(node_clone, rte_str, end_point).await;
+
+            //last route to add, ok to return
+            if is_last {
+                return Ok(());
+            }
+
+            //node was note last next iteration
+            node = added;
+
         }
 
         Ok(())
@@ -209,14 +230,31 @@ impl RouteTree {
 
             let brw_node = node.lock().await;
 
-            let mut child = brw_node.get_child(route_part);
+            let mut child = brw_node.brw_child(route_part);
 
-            if let None = child {
-                match &brw_node.var_child {
-                    Some(x) => child = Some(x.clone()),
-                    None => {
-                        return None;
-                    }
+            //do a check to ensure that there is no var child we are missing.
+            if child.is_none() {
+                //nothing further to do
+                if brw_node.var_child.is_none() {
+                    return None;
+                }
+
+                let var_child_node = brw_node
+                    .var_child
+                    .as_ref()
+                    .map(|r_node| r_node.clone())
+                    .unwrap();
+
+                let is_wild_card = {
+                    let node_in = var_child_node.lock().await;
+                    node_in.id.eq("{*}")
+                };
+
+                child = Some(var_child_node);
+
+                //wild carded
+                if is_wild_card {
+                    return child;
                 }
             }
 
