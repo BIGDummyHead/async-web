@@ -150,15 +150,25 @@ impl App {
             req_lock.route.cleaned_route.clone()
         };
 
-        let mut given_route_parts: Vec<&str> = given_route.split('/').rev().collect();
+        let mut given_route_parts: Vec<&str> = given_route.split('/').collect();
 
         let mut current_ref = Some(route_ref.clone());
 
-        //used for wildcard matches.
-        let mut skip = 1;
+        let wild_card_skip = {
+            let mut current = Some(route_ref.clone());
+            let mut wild_skip = 0;
+
+            while let Some(node) = current {
+                let guard = node.lock().await;
+                current = guard.parent.clone();
+                wild_skip += 1;
+            }
+
+            //skip for the WILDCARD {*} and SKIP for the beginning "/" route.
+            wild_skip - 1
+        };
 
         while let Some(c_ref) = current_ref {
-            
             //pop a route part
             let route_part = given_route_parts.pop();
 
@@ -182,8 +192,6 @@ impl App {
             let c_ref_lock = c_ref.lock().await;
 
             if c_ref_lock.is_var {
-                println!("Route Part: {route_part}");
-
                 //clean the ID from {name} -> name
                 let mut id = c_ref_lock.id.clone();
                 id.remove(0);
@@ -192,20 +200,18 @@ impl App {
                 let is_wild = id.eq("*");
 
                 let value = if is_wild {
-                    let value = given_route_parts
+                    given_route_parts.push(route_part);
+
+                    given_route_parts
                         .iter()
-                        .rev()
-                        .skip(skip + 1)
+                        .skip(wild_card_skip)
                         .copied()
                         .collect::<Vec<&str>>()
-                        .join("/");
-
-                    value
+                        .join("/")
                 } else {
                     route_part.to_string()
                 };
 
-                println!("ID/VALUE: {id}/{value}");
                 req_ref.lock().await.variables.insert(id, value);
 
                 if is_wild {
@@ -214,8 +220,6 @@ impl App {
             }
 
             current_ref = c_ref_lock.parent.clone();
-
-            skip += 1;
         }
     }
 

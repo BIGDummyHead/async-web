@@ -53,10 +53,12 @@ mod tests {
         .await;
 
     app.add_or_panic(
-            "/test/asdx/{name}",
+            "/public/{*}",
             Method::GET,
             None,
-            resolve!(_req, { EmptyResolution::new(200) }),
+            resolve!(_req, { 
+                
+                EmptyResolution::new(200) }),
         )
         .await;
 
