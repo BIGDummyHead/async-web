@@ -41,6 +41,24 @@ pub enum Configured {
 ///   }   
 ///    
 /// ```
+/// 
+/// You can optionally configure the output of the ErrorResolution in a few different idiomatic ways.
+/// 
+/// For example:
+/// 
+/// ```
+///    let e: Box<dyn std::error::Error>; //pretend we have some error we can move.
+/// 
+///     ErrorResolution::from_error_with_config(e, Configured::PlainText);
+///     //or 
+///     ErrorResolution::from_error_with_config(e, Configured::Json);
+///     //or
+///     ErrorResolution::from_error_with_config(e, Configured::Custom(|e| {
+///         //return a String based value with the error message.
+///         "Custom error!".to_string()
+///     }));
+///     
+/// ```
 pub struct ErrorResolution {
     error: Box<dyn std::error::Error + Send + Sync + 'static>,
     config: Configured,
@@ -51,13 +69,23 @@ impl ErrorResolution {
     /// Create an error resolution based on an error using a configuration.
     ///
     /// Makes creating error based resolutions significantly easier.
-    pub fn from_error(
+    pub fn from_error_with_config(
         error: Box<dyn std::error::Error + Send + Sync + 'static>,
         config: Configured,
     ) -> Box<dyn Resolution> {
         let resolve = ErrorResolution { error, config };
 
         Box::new(resolve)
+    }
+
+     /// # Error Resolution
+    /// Create an error resolution based on an error using a configuration.
+    ///
+    /// Makes creating error based resolutions significantly easier.
+    pub fn from_error(
+        error: Box<dyn std::error::Error + Send + Sync + 'static>
+    ) -> Box<dyn Resolution> {
+        return Self::from_error_with_config(error, Configured::PlainText);
     }
 }
 
