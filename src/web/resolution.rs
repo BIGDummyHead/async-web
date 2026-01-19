@@ -5,6 +5,7 @@ use async_stream::stream;
 pub mod empty_resolution;
 pub mod file_resolution;
 pub mod json_resolution;
+pub mod error_resolution;
 
 /// Represents a resolution for a request
 pub trait Resolution {
