@@ -29,28 +29,28 @@ pub enum Configured {
 /// For example:
 ///
 /// ```
-/// 
+///
 ///   //snip inside of resolution endpoint.
-/// 
-///   let user: Result<UserLogin, Box<dyn Resolution>> = 
+///
+///   let user: Result<UserLogin, Box<dyn Resolution>> =
 ///     serde_json::from_slice(&guard.body)
 ///     .map_err(ErrorResolution::from_error);
-/// 
+///
 ///   if let Err(e_resolution) = user {
 ///     return e_resolution;
 ///   }   
 ///    
 /// ```
-/// 
+///
 /// You can optionally configure the output of the ErrorResolution in a few different idiomatic ways.
-/// 
+///
 /// For example:
-/// 
+///
 /// ```
 ///    let e: Box<dyn std::error::Error>; //pretend we have some error we can move.
-/// 
+///
 ///     ErrorResolution::from_error_with_config(e, Configured::PlainText);
-///     //or 
+///     //or
 ///     ErrorResolution::from_error_with_config(e, Configured::Json);
 ///     //or
 ///     ErrorResolution::from_error_with_config(e, Configured::Custom(|e| {
@@ -69,24 +69,48 @@ impl ErrorResolution {
     /// Create an error resolution based on an error using a configuration.
     ///
     /// Makes creating error based resolutions significantly easier.
-    pub fn from_error_with_config(
-        error: Box<dyn std::error::Error + Send + Sync + 'static>,
+    pub fn from_error_with_config<T>(
+        error: T,
         config: Configured,
-    ) -> Box<dyn Resolution> {
-        let resolve = ErrorResolution { error, config };
+    ) -> Box<dyn Resolution>
+    where
+        T: std::error::Error + Send + Sync + 'static,
+    {
+        let resolve = ErrorResolution { error: Box::new(error), config };
 
         Box::new(resolve)
     }
 
-     /// # Error Resolution
+    /// # Error Resolution
     /// Create an error resolution based on an error using a configuration.
     ///
     /// Makes creating error based resolutions significantly easier.
-    pub fn from_error(
-        error: Box<dyn std::error::Error + Send + Sync + 'static>
-    ) -> Box<dyn Resolution> {
+    pub fn from_error<T>(
+        error: T,
+    ) -> Box<dyn Resolution> 
+    where 
+       T: std::error::Error + Send + Sync + 'static {
         return Self::from_error_with_config(error, Configured::PlainText);
     }
+
+    /// # Error Resolution
+    /// 
+    /// Creats an error resolution based on an error.
+    pub fn from_boxed_error(error: Box<dyn std::error::Error + Send + Sync + 'static>) 
+    -> Box<dyn Resolution> {
+        return Self::from_boxed_error_with_config(error, Configured::PlainText);
+    }
+
+    /// # Error Resolution
+    /// 
+    /// Creats an error resolution based on an error.
+    pub fn from_boxed_error_with_config(error: Box<dyn std::error::Error + Send + Sync + 'static>, config: Configured) 
+    -> Box<dyn Resolution> {
+        let resolve = ErrorResolution { error, config };
+        Box::new(resolve)
+    }
+
+    
 }
 
 #[derive(Serialize)]
