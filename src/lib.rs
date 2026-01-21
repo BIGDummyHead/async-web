@@ -91,17 +91,17 @@ mod tests {
             Method::GET,
             None,
             resolve!(_req, {
-                let code = {
+                let code: Result<i32, ErrorResolution> = {
                     let a = 10;
                     let b = 20;
 
                     if a + b == 30 {
-                        Err(WorkerError::new(WorkerErrorType::AlreadyRunning))
+                        Err(Box::new(WorkerError::new(WorkerErrorType::AlreadyRunning)))
                     } else {
                         Ok(200)
                     }
-                }
-                .map_err(|e| ErrorResolution::from_error_with_config(e, Configured::Json));
+                }.map_err(|b_err| ErrorResolution::from_boxed_error_with_config(b_err, Configured::Json));
+
 
                 if let Err(e_res) = code {
                     return e_res.into();

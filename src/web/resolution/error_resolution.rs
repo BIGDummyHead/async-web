@@ -109,9 +109,11 @@ impl ErrorResolution {
         config: Configured,
     ) -> Self
     where
-        T: std::error::Error + Send  + 'static,
+        T: std::error::Error + 'static,
     {
-        let resolve = ErrorResolution { error: Box::new(error), config };
+        let error = InnerError::new_box(Box::new(error));
+
+        let resolve = ErrorResolution { error, config };
 
         resolve
     }
@@ -125,7 +127,7 @@ impl ErrorResolution {
         error: T,
     ) -> Self
     where 
-       T: std::error::Error + Send  + 'static {
+       T: std::error::Error + 'static {
         return Self::from_error_with_config(error, Configured::PlainText);
     }
 
@@ -134,7 +136,7 @@ impl ErrorResolution {
     /// Creates a new ErrorResolution (boxed) based on a Box<dyn std::error::Error> with PlainText set as the configuration.
     /// 
     /// See `from_boxed_error_with_config` if you would like to customize the output of this resolution.
-    pub fn from_boxed_error(error: Box<dyn std::error::Error + Send  + 'static>) 
+    pub fn from_boxed_error(error: Box<dyn std::error::Error>) 
     -> Self {
         return Self::from_boxed_error_with_config(error, Configured::PlainText);
     }
@@ -144,8 +146,11 @@ impl ErrorResolution {
     /// Creates a new ErrorResolution (boxed) based on a Box<dyn std::error::Error> and allows for custom configuration.
     /// 
     /// See the Configured Enum for choices of output.
-    pub fn from_boxed_error_with_config(error: Box<dyn std::error::Error + Send  + 'static>, config: Configured) 
+    pub fn from_boxed_error_with_config(error: Box<dyn std::error::Error>, config: Configured) 
     -> Self {
+
+        let error = InnerError::new_box(error);
+
         let resolve = ErrorResolution { error, config };
         resolve
     }
@@ -153,8 +158,10 @@ impl ErrorResolution {
     
 }
 
+
+// struct that has a code and message, used for the Configured output of Json
 #[derive(Serialize)]
-struct JsonError {
+struct InternalJsonResultError {
     code: i32,
     message: String,
 }
@@ -169,7 +176,7 @@ impl Resolution for ErrorResolution {
     fn get_content(&self) -> std::pin::Pin<Box<dyn futures::Stream<Item = Vec<u8>> + Send>> {
         let error_bytes = match &self.config {
             Configured::Json => {
-                let error = JsonError {
+                let error = InternalJsonResultError {
                     code: 500,
                     message: self.error.to_string(),
                 };
@@ -191,3 +198,49 @@ impl Resolution for ErrorResolution {
         Box::pin(stream::once(async move { error_bytes }))
     }
 }
+
+
+
+/// # Inner Error
+/// 
+/// The inner error works as a container, it holds the Boxed error that is non-thread safe.
+/// 
+/// The Inner Error then implments the following traits
+/// 
+/// * std::error::Error
+/// * std::fmt::Display
+/// * core::marker::Send
+/// 
+/// For formatting, it relies on the format of the inner boxed error. So it uses the exact output as the error passed through.
+/// 
+/// This essentially makes a Box<std::error::Error> thread safe.
+/// 
+#[derive(Debug)]
+struct InnerError {
+    error: Box<dyn std::error::Error>
+}
+
+impl InnerError {
+
+    /// Create a new InnerError from a Boxed error.
+    fn new_box(contain: Box<dyn std::error::Error>) -> Box<dyn std::error::Error + Send + 'static> {
+        let inner = Self {
+            error: contain
+        };
+
+        Box::new(inner)
+    }
+}
+
+// impl simple Display based on the error string
+impl std::fmt::Display for InnerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&(*self.error), f)
+    }
+}
+
+// error for idiomatic returns
+impl std::error::Error for InnerError {}
+
+//impl send for this, for sending between async operations
+unsafe impl Send for InnerError{}
