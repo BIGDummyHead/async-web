@@ -16,7 +16,9 @@ mod tests {
     use crate::{
         middleware, resolve,
         web::{
-            App, EndPoint, Method, Middleware, resolution::empty_resolution::EmptyResolution,
+            App, EndPoint, Method, Middleware,
+            errors::{WorkerError, worker_error::WorkerErrorType},
+            resolution::{empty_resolution::EmptyResolution, error_resolution::{Configured, ErrorResolution}},
             routing::router::route_tree::RouteTree,
         },
     };
@@ -52,13 +54,11 @@ mod tests {
         )
         .await;
 
-    app.add_or_panic(
+        app.add_or_panic(
             "/public/{*}",
             Method::GET,
             None,
-            resolve!(_req, { 
-                
-                EmptyResolution::new(200) }),
+            resolve!(_req, { EmptyResolution::new(200) }),
         )
         .await;
 
@@ -82,6 +82,32 @@ mod tests {
                 }
 
                 EmptyResolution::new(200)
+            }),
+        )
+        .await;
+
+        app.add_or_panic(
+            "/error_test",
+            Method::GET,
+            None,
+            resolve!(_req, {
+                let test = {
+                    let a = 10;
+                    let b = 20;
+
+                    if a + b == 30 {
+                        Err(WorkerError::new(WorkerErrorType::AlreadyRunning))
+                    } else {
+                        Ok(200)
+                    }
+                }
+                .map_err(|e| ErrorResolution::from_error_with_config(e, Configured::Json));
+
+                if let Err(e) = test {
+                    e
+                } else {
+                    EmptyResolution::new(200)
+                }
             }),
         )
         .await;
