@@ -91,7 +91,7 @@ mod tests {
             Method::GET,
             None,
             resolve!(_req, {
-                let test = {
+                let code = {
                     let a = 10;
                     let b = 20;
 
@@ -103,11 +103,14 @@ mod tests {
                 }
                 .map_err(|e| ErrorResolution::from_error_with_config(e, Configured::Json));
 
-                if let Err(e) = test {
-                    e
-                } else {
-                    EmptyResolution::new(200)
-                }
+                if let Err(e_res) = code {
+                    return e_res.into();
+                }                
+
+                let code: i32 = code.unwrap();
+                
+                EmptyResolution::new(code)
+
             }),
         )
         .await;

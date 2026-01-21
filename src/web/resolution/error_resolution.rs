@@ -1,4 +1,4 @@
-use std::panic;
+use std::{fmt::Debug, panic};
 
 use futures::stream;
 use serde::Serialize;
@@ -35,6 +35,18 @@ pub enum Configured {
     /// The error handler can now to be reused to configure an output.
     Custom(Box<ErrorFormatter>),
 }
+
+/// debug impl
+impl std::fmt::Debug for Configured {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Configured::PlainText => write!(f, "PlainText"),
+            Configured::Json => write!(f, "Json"),
+            Configured::Custom(_) => write!(f, "Custom(...)"),
+        }
+    }
+}
+
 
 /// # Error Resolution
 ///
@@ -73,9 +85,16 @@ pub enum Configured {
 ///     }));
 ///     
 /// ```
+#[derive(Debug)]
 pub struct ErrorResolution {
     error: Box<dyn std::error::Error + Send  + 'static>,
     config: Configured,
+}
+
+impl Into<Box <dyn Resolution + Send + 'static>> for ErrorResolution {
+    fn into(self) -> Box <dyn Resolution + Send + 'static> {
+        Box::new(self)
+    }
 }
 
 impl ErrorResolution {
@@ -88,13 +107,13 @@ impl ErrorResolution {
     pub fn from_error_with_config<T>(
         error: T,
         config: Configured,
-    ) -> Box<dyn Resolution + Send  + 'static>
+    ) -> Self
     where
         T: std::error::Error + Send  + 'static,
     {
         let resolve = ErrorResolution { error: Box::new(error), config };
 
-        Box::new(resolve)
+        resolve
     }
 
     /// # From Error
@@ -104,7 +123,7 @@ impl ErrorResolution {
     /// See `from_boxed_error_with_config` for other outputs.
     pub fn from_error<T>(
         error: T,
-    ) -> Box<dyn Resolution + Send  + 'static>
+    ) -> Self
     where 
        T: std::error::Error + Send  + 'static {
         return Self::from_error_with_config(error, Configured::PlainText);
@@ -116,7 +135,7 @@ impl ErrorResolution {
     /// 
     /// See `from_boxed_error_with_config` if you would like to customize the output of this resolution.
     pub fn from_boxed_error(error: Box<dyn std::error::Error + Send  + 'static>) 
-    -> Box<dyn Resolution + Send  + 'static> {
+    -> Self {
         return Self::from_boxed_error_with_config(error, Configured::PlainText);
     }
 
@@ -126,9 +145,9 @@ impl ErrorResolution {
     /// 
     /// See the Configured Enum for choices of output.
     pub fn from_boxed_error_with_config(error: Box<dyn std::error::Error + Send  + 'static>, config: Configured) 
-    -> Box<dyn Resolution + Send  + 'static> {
+    -> Self {
         let resolve = ErrorResolution { error, config };
-        Box::new(resolve)
+        resolve
     }
 
     
