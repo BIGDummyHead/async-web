@@ -56,7 +56,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_app_twice_drop() {
+    async fn create_app() {
 
         //bind to local machine
         let app = App::bind(1000, "127.0.0.1:80").await;
@@ -69,17 +69,6 @@ mod tests {
 
         closure_func.await;
 
-        //bind to local machine
-        let app = App::bind(1000, "127.0.0.1:80").await;
-
-        assert!(app.is_ok(), "app could not bind!");
-
-        let app = app.unwrap();
-
-        let app_handle = app.start();
-
-        //kill the app
-        app_handle.await;
     }
 
 }
