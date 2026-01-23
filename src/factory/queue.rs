@@ -65,8 +65,9 @@ impl<R> Queue<R> {
 
         loop {
 
-            if let Some(c) = &closure {
-                if *c.lock().await {
+            
+            if let Some(is_closed_ref) = &closure {
+                if *is_closed_ref.lock().await {
                     return None;
                 }
             }

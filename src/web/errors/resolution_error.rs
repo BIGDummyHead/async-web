@@ -1,9 +1,11 @@
 use std::error::Error;
 
-/// Types of routing errors
+/// Resolution errors when a resolution is called.
 #[derive(Debug)]
 pub enum ResolutionError {
+    /// Could not resolve the resolution
     CouldNotResolve(String),
+    /// There was another reason that the resolution could not resolve.
     Other(String)
 }
 

@@ -1,8 +1,12 @@
-/// ## Method
+/// # Method
 /// 
-/// The routing method.
+/// Describes a method that a HTTP request may send. 
 /// 
-/// Used when adding a routing type to your program or when a request comes in.
+/// Commont variants may include GET, POST, DELETE, etc...
+/// 
+/// This is used majorly when creating route. 
+/// 
+/// Routes may have the same path if and only if the method does not match an existing method for that route.
 #[derive(Debug)]
 #[derive(Eq, Hash, PartialEq)]
 #[derive(Clone)]

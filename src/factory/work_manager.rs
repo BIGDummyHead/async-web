@@ -1,16 +1,17 @@
 use std::{pin::Pin, sync::Arc};
 
 use futures::future::join_all;
-use tokio::{
-    sync::{
-        Mutex,
-        mpsc::{self, Receiver, Sender},
-    }
+use tokio::sync::{
+    Mutex,
+    mpsc::{self, Receiver, Sender},
 };
 
 use crate::factory::{Queue, Worker};
 
-/// Represents a distrubutor of work.
+/// # Work Manager
+///
+/// Represents a manager of [`Worker`]s. Contains a queue of work to be complete by the N workers.
+///
 pub struct WorkManager<R>
 where
     R: Send + 'static,
@@ -21,7 +22,7 @@ where
     pub sender: Sender<R>,
     ///The receiver, used to get incoming data from workers.
     pub receiver: Arc<Mutex<Receiver<R>>>,
-    /// Vec of created workers 
+    /// Vec of created workers
     workers: Vec<Worker<R>>,
     /// Work to complete. Async work that returns the R type given
     work: Arc<Queue<Pin<Box<dyn Future<Output = R> + Send + 'static>>>>,
@@ -31,17 +32,17 @@ impl<R> WorkManager<R>
 where
     R: Send + 'static,
 {
-    /// Create a new set of n workers to complete work for this R set of functions. 
-    /// 
-    /// An optional buffer may be passed in for the mpsc::channel. This buffer controls the amount of messages the sender must receive before it is flushed
-    /// This count is automatically set to 0 if "None" is passed in.
-    pub async fn new(size: usize, opt_buffer: Option<usize>) -> Self {
-        let buffer = match opt_buffer {
-            None => 1,
-            Some(x) => x,
-        };
-
-        let (tx, rx) = mpsc::channel(buffer);
+    /// # New
+    ///
+    /// Creates a new work manager that has N amount of workers.
+    ///
+    /// The amount of workers also sets the size of the channel buffer size.
+    ///
+    /// For example this allows us to distribute a batch of work.
+    ///
+    /// Assume that we make a WorkManager of 100 workers and 200 task come in, each worker will assume a task, run, finish, and take another task.
+    pub async fn new(size: usize) -> Self {
+        let (tx, rx) = mpsc::channel(size);
 
         let receiver = Arc::new(Mutex::new(rx));
 
@@ -58,41 +59,55 @@ where
         }
     }
 
-    /// The amount of workers created
+    /// Returns the amount of workers this manager uses. NOT the size that was initially used.
     pub fn worker_count(&self) -> usize {
-        self.size
+        self.workers.len()
     }
 
-    /// Get the queue of work being used by the workers.
-    pub fn get_queue(&self) -> Arc<Queue<Pin<Box<dyn Future<Output = R> + Send + 'static>>>> {
-        self.work.clone()
+    /// # Worker Errors
+    ///
+    /// Returns the count of errors that occurred when creating workers.
+    pub fn worker_errors(&self) -> usize {
+        self.size - self.worker_count()
     }
 
+    /// # create workers
+    ///
+    /// Creates a batch of workers Of the size, cloning both the sender and the work load references.
+    ///
+    /// It is important to note that if the worker upon creation experiences an error it is not captured. And the reference is dropped.
     async fn create_workers(
         size: usize,
         sender: &Sender<R>,
         work: &Arc<Queue<Pin<Box<dyn Future<Output = R> + Send + 'static>>>>,
     ) -> Vec<Worker<R>> {
-        
-        let mut work_futs= vec![];
+        // work start futures
+        let mut work_futs = vec![];
 
+        // for the size of workers
         for _ in 0..size {
-            let tx = sender.clone();
+            //clone the sender
+            let data_sender = sender.clone();
 
-            let wrk = work.clone();
+            //clone the work queue
+            let work_queue = work.clone();
 
-            let mut worker = Worker::new(tx, wrk);
+            let mut worker = Worker::new(data_sender, work_queue);
 
-            //push an async closure that starts the worker then returns it... these are awaited later.
+            //push each worker future and map the result to return the Worker that was created.
             work_futs.push(async move {
                 //we can ignore this value.
-                let _ = worker.start_worker().await;
-                return worker;
+                let start_result = worker.start_worker().await.map(|_| worker);
+                start_result
             });
         }
 
-
-        join_all(work_futs).await
+        //join all futures, run, into iter, filter into map where results are ok, collect into Vec<Worker<R>>
+        join_all(work_futs)
+            .await
+            .into_iter()
+            .filter_map(Result::ok)
+            .collect()
     }
 
     /// Add work to the queue for workers to complete.
@@ -100,10 +115,8 @@ where
         self.work.queue(work).await
     }
 
-
     /// Close all workers, the queue, and wait for them to finish
     pub async fn close_and_finish_work(&mut self) -> () {
-
         let mut close_futs = vec![];
 
         for worker in &mut self.workers {
@@ -113,5 +126,4 @@ where
 
         join_all(close_futs).await;
     }
-
 }

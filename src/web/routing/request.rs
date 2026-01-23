@@ -31,12 +31,15 @@ pub struct Request {
     pub body: Vec<u8>,
 
     /// The connected socket of the client
-    pub client_socket: SocketAddr
+    pub client_socket: SocketAddr,
 }
 
 impl Request {
     /// Parse a tcp stream request and gives back the Request
-    pub async fn parse_request(stream: &mut TcpStream, client_socket: SocketAddr) -> Result<Self, std::io::Error> {
+    pub async fn parse_request(
+        stream: &mut TcpStream,
+        client_socket: SocketAddr,
+    ) -> Result<Self, std::io::Error> {
         //create a buffer that will read each line
         let mut reader = BufReader::new(stream);
 
@@ -48,61 +51,62 @@ impl Request {
         if first_line.is_empty() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "The first line was not found.",
+                "parse request failed due to no data being provided",
             ));
         }
 
         let mut request_header = first_line.split(" ");
 
-        let method = match request_header.next() {
-            None => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "The header for the request was missing the method.",
-                ));
-            }
-            Some(v) => {
-                let method = match v {
+        let method = request_header
+            .next()
+            .map(|header_value| {
+                Ok(match header_value {
                     "GET" => Method::GET,
                     "PUT" => Method::PUT,
                     "POST" => Method::POST,
                     "DELETE" => Method::DELETE,
                     "PATCH" => Method::PATCH,
-                    v => Method::Other(String::from(v)),
-                };
+                    header_value => Method::Other(header_value.to_string()),
+                })
+            })
+            .unwrap_or(Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "missing header for method",
+            )))?;
 
-                method
-            }
-        };
-
-        let route = match request_header.next() {
-            None => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "The header for the request was missing the route.",
-                ));
-            }
-            Some(route) => Route::parse_route(String::from(route)),
-        };
+        let route = request_header
+            .next()
+            .map(|header_value| Ok(Route::parse_route(header_value.to_string())))
+            .unwrap_or(Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "missing header for request",
+            )))?;
 
         //all other headers beside the first
         let mut headers = HashMap::new();
 
         //insert all headers
         loop {
-            let mut read_line = String::new();
+            let mut read_header = String::new();
 
-            reader.read_line(&mut read_line).await?;
+            reader.read_line(&mut read_header).await?;
 
-            let header = read_line.trim_end();
+            let read_header = read_header.trim_end();
 
-            if header.is_empty() {
+            //no more headers.
+            if read_header.is_empty() {
                 break;
             }
 
-            if let Some((header_key, header_val)) = header.split_once(":") {
-                headers.insert(String::from(header_key), String::from(header_val.trim()));
+            let split_header = read_header.split_once(":");
+
+            if split_header.is_none() {
+                continue;
             }
+
+            //unwrap the known some value and insert into the headers.
+            let (header_key, header_val) = split_header.unwrap();
+            headers.insert(String::from(header_key), String::from(header_val.trim()));
         }
 
         let content_length = headers
@@ -122,7 +126,7 @@ impl Request {
             headers,
             body,
             variables: HashMap::new(),
-            client_socket
+            client_socket,
         })
     }
 }

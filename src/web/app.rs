@@ -79,7 +79,7 @@ impl App {
             return Err(e);
         }
 
-        let work_manager = Arc::new(WorkManager::new(worker_count, Some(100)).await);
+        let work_manager = Arc::new(WorkManager::new(worker_count).await);
 
         let listener = Arc::new(bind_result.unwrap());
         let router = Arc::new(Mutex::new(RouteTree::new(None)));
@@ -231,14 +231,31 @@ impl App {
     ///
     /// A `JoinHandle` referencing the spawned server task.
 
-    pub async fn start(&self) -> JoinHandle<()> {
+    pub fn start(&self) -> impl Future<Output = ()> {
         let listener = self.listener.clone();
         let work_manager = self.work_manager.clone();
         let router = self.router.clone();
         let global_middleware = self.global_middleware.clone();
 
+        let closure_ref = Arc::new(Mutex::new(false));
+
+        //for the closure function
+        let closure_ref_func_ref = closure_ref.clone();
+        let closure = async move {
+            println!("Closing");
+            let mut closure_guard = closure_ref_func_ref.lock().await;
+            *closure_guard = true;
+        };
+
         task::spawn(async move {
             loop {
+
+                let stopped = { *closure_ref.lock().await };
+
+                if stopped {
+                    break;
+                }
+
                 let accepted_client = listener.accept().await;
 
                 if let Err(c_err) = accepted_client {
@@ -256,7 +273,11 @@ impl App {
                     }))
                     .await;
             }
-        })
+
+            drop(listener);
+        });
+
+        closure
     }
 
     /// Executes all logic required to handle a single client request.

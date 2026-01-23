@@ -19,15 +19,20 @@ pub trait Resolution {
     fn get_content(&self) -> Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>;
 }
 
-/// Returns a status string based on a code.
+/// # Get Status 
 ///
-/// ### Example
+/// This function can be used to create headers based on code.
+/// 
+/// The get_status function takes in a status code and turns it into the header. For example
+/// 
 /// ```
-/// let status = get_status(200);
-///
-/// //output is OK
-/// println!("{status}");
-///
+/// 
+/// //okay code
+/// let code = 200;
+/// 
+/// // status is equal to "OK"
+/// let status = get_status(&code);
+/// 
 /// ```
 pub fn get_status(status_code: &i32) -> &str {
     match status_code {
@@ -125,6 +130,8 @@ pub fn get_status_header(status_code: i32) -> String {
     return format!("HTTP/1.1 {} {}", status_code, status).to_string();
 }
 
+/// # Empty Content
+/// 
 /// Signals that there is no content to serve.
 ///
 /// Equal to
@@ -136,11 +143,13 @@ pub fn empty_content() -> Vec<u8> {
     Vec::new()
 }
 
-
-pub async fn streamed_empty_content() ->  Pin<Box<dyn Stream<Item = Vec<u8>> + Send + 'static>> {
-    let stream_result = stream! {
-        yield Vec::<u8>::new();
-    };
-
-    Box::pin(stream_result)
+/// # Stream Empty Content
+/// 
+/// This function is equal to providing empty content or an empty Vec<u8> to the user.
+/// 
+/// The difference is that it Pins, boxes, streams, and yields the empty vector providing a shorter format.
+pub async fn stream_empty_content() ->  Pin<Box<dyn Stream<Item = Vec<u8>> + Send + 'static>> {
+    Box::pin(stream!{
+        yield empty_content()
+    })
 }
