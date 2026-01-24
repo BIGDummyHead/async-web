@@ -2,10 +2,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::web::{
-    EndPoint, Method,
-    errors::{RoutingError, routing_error::RoutingErrorType},
-};
+use crate::web::{EndPoint, Method, errors::RoutingError};
 
 use crate::web::routing::RouteNodeRef;
 use crate::web::routing::router::route_node::RouteNode;
@@ -93,9 +90,7 @@ impl RouteTree {
         end_point: Option<(Method, EndPoint)>,
     ) -> Result<(), RoutingError> {
         if route.is_empty() {
-            return Err(RoutingError::new(RoutingErrorType::InvalidRoute(
-                "empty".to_string(),
-            )));
+            return Err(RoutingError::InvalidRoute("empty".to_string()));
         }
 
         let root = self.root.clone();
@@ -108,7 +103,7 @@ impl RouteTree {
                 return Ok(());
             }
 
-            return Err(RoutingError::new(RoutingErrorType::MethodMissing));
+            return Err(RoutingError::MethodMissing);
         }
 
         let full_route = route.to_string();
@@ -176,7 +171,6 @@ impl RouteTree {
 
             //node was note last next iteration
             node = added;
-
         }
 
         Ok(())

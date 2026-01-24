@@ -8,7 +8,7 @@ pub mod json_resolution;
 pub mod error_resolution;
 
 /// Represents a resolution for a request
-pub trait Resolution {
+pub trait Resolution: Send + 'static {
     ///
     /// Get all headers for the HTTP response.
     ///
@@ -17,6 +17,12 @@ pub trait Resolution {
     ///
     /// Get the content for the resolution. Gets pushed into the headers. Then a length is used.
     fn get_content(&self) -> Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>;
+
+
+    /// # resolve
+    /// 
+    /// Resolves this Resolution by Boxing it to conform to the return type of a resolution.
+    fn resolve(self) -> Box<dyn Resolution + Send + 'static>;
 }
 
 /// # Get Status 

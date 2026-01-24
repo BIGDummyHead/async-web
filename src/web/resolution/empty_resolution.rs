@@ -16,10 +16,8 @@ pub struct EmptyResolution {
 
 impl EmptyResolution {
     /// Create a new boxed Empty Resolution
-    pub fn new(status_code: i32) -> Box<dyn super::Resolution + Send> {
-        let res = Self { status_code };
-
-        Box::new(res) as Box<dyn super::Resolution + Send>
+    pub fn status(code: i32) -> Self {
+        Self { status_code: code }
     }
 }
 
@@ -30,5 +28,9 @@ impl Resolution for EmptyResolution {
 
     fn get_content(&self) -> std::pin::Pin<Box<dyn Stream<Item = Vec<u8>> + Send>> {
         Box::pin(stream::once(async move { empty_content() }))
+    }
+
+    fn resolve(self) -> Box<dyn Resolution + Send + 'static> {
+        Box::new(self)
     }
 }

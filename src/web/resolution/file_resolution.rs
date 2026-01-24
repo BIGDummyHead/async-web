@@ -27,13 +27,25 @@ pub struct FileResolution {
 }
 
 impl FileResolution {
-    pub fn new(file_path: String) -> Box<dyn super::Resolution + Send> {
-        let res = Self { file_path };
-
-        Box::new(res) as Box<dyn super::Resolution + Send>
+    pub fn new(file_path: &str) -> Self {
+        Self {
+            file_path: file_path.to_string(),
+        }
     }
 
-    /// Retrieves the file type for a header.
+    /// # Get File Type Header
+    /// 
+    /// Returns a header for the file based on the extension of the file, for example:
+    /// 
+    /// ```
+    /// let f_res = FileResolution::new("content/style.css");
+    /// 
+    /// let file_header = f_res::get_file_type_header();
+    /// 
+    /// //output is: "text/css"
+    /// println!("{file_header}");
+    /// ```
+    /// 
     fn get_file_type_header(&self) -> String {
         // extract extension (lowercased)
         let ext = match std::path::Path::new(&self.file_path)
@@ -88,18 +100,23 @@ impl FileResolution {
         .to_string()
     }
 
+    /// # Get Status
+    ///
+    /// returns the status of the file
+    ///
+    ///  `200` -> File exist
+    ///
+    ///  `404` -> File does not exist
     fn get_status(&self) -> i32 {
-        let path = std::path::Path::new(&self.file_path);
-
-        if path.exists() {
-            return 200;
-        }
-
-        404
+        if std::path::Path::new(&self.file_path).exists() { 200 } else { 404 }
     }
 }
 
 impl Resolution for FileResolution {
+
+    /// # get headers
+    /// 
+    /// For this implementation the headers are the status of the file 200/404 and the file type header, see the get_file_type_header function
     fn get_headers(&self) -> std::pin::Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>> {
         Box::pin(async move {
             vec![
@@ -109,9 +126,16 @@ impl Resolution for FileResolution {
         })
     }
 
+    /// # get content
+    /// 
+    /// returns the files content streamed.
     fn get_content(&self) -> std::pin::Pin<Box<dyn Stream<Item = Vec<u8>> + Send + 'static>> {
         let file_path = self.file_path.clone();
 
         Box::pin(stream_file(file_path))
+    }
+    
+    fn resolve(self) -> Box<dyn Resolution + Send + 'static> {
+        Box::new(self)
     }
 }

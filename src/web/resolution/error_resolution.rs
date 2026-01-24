@@ -197,6 +197,10 @@ impl Resolution for ErrorResolution {
 
         Box::pin(stream::once(async move { error_bytes }))
     }
+    
+    fn resolve(self) -> Box<dyn Resolution + Send + 'static> {
+        Box::new(self)
+    }
 }
 
 

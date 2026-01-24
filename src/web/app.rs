@@ -1,18 +1,18 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, pin::Pin, sync::Arc};
 
 use futures::StreamExt;
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream, ToSocketAddrs},
-    sync::{Mutex, MutexGuard},
+    sync::{Mutex, MutexGuard, broadcast},
     task::{self, JoinHandle},
 };
 
-use crate::factory::WorkManager;
+use crate::{factory::WorkManager, web::errors::AppState};
 
 use crate::web::{
     EndPoint, Method, Middleware, Request, Resolution,
-    errors::{RoutingError, routing_error::RoutingErrorType},
+    errors::RoutingError,
     resolution::empty_resolution::EmptyResolution,
     routing::{
         ResolutionFunc, RouteNodeRef,
@@ -35,9 +35,12 @@ use crate::web::{
 /// ```
 pub struct App {
     pub work_manager: Arc<WorkManager<()>>,
-    pub listener: Arc<TcpListener>,
+    pub listener: Option<TcpListener>,
     pub router: Arc<Mutex<RouteTree>>,
     global_middleware: Arc<Mutex<Vec<MiddlewareClosure>>>,
+    app_task: Option<JoinHandle<()>>,
+    error_callback: Option<Arc<Pin<Box<dyn Fn(String) -> () + Send + Sync + 'static>>>>,
+    shutdown: Option<broadcast::Sender<()>>,
 }
 
 /// Represents a web application where you can bind, route, and do other web server related activities.
@@ -81,7 +84,7 @@ impl App {
 
         let work_manager = Arc::new(WorkManager::new(worker_count).await);
 
-        let listener = Arc::new(bind_result.unwrap());
+        let listener = Some(bind_result.unwrap());
         let router = Arc::new(Mutex::new(RouteTree::new(None)));
 
         let bind = Self {
@@ -89,6 +92,9 @@ impl App {
             listener,
             router,
             global_middleware: Arc::new(Mutex::new(Vec::new())),
+            app_task: None,
+            error_callback: None,
+            shutdown: None,
         };
 
         bind.consume().await;
@@ -223,61 +229,98 @@ impl App {
         }
     }
 
-    /// Starts the main TCP accept loop for the application.
+    /// # Start
     ///
-    /// Each accepted connection is submitted to the work manager for processing.
+    /// Starts the application.
     ///
-    /// # Returns
+    /// ## Returns
     ///
-    /// A `JoinHandle` referencing the spawned server task.
+    /// This function returns:
+    ///
+    /// Err(AppState::Running) if the application was already running
+    ///
+    /// or
+    ///
+    /// Ok(AppState::Running) if the application was started successfully.
+    pub fn start(&mut self) -> Result<AppState, AppState> {
+        if self.app_task.is_some() {
+            return Err(AppState::Running);
+        }
 
-    pub fn start(&self) -> impl Future<Output = ()> {
-        let listener = self.listener.clone();
+        // create reference clones to each thing passed to the opened task
         let work_manager = self.work_manager.clone();
         let router = self.router.clone();
         let global_middleware = self.global_middleware.clone();
 
-        let closure_ref = Arc::new(Mutex::new(false));
+        let error_callback = self.error_callback.as_ref().map(|cb| cb.clone());
 
-        //for the closure function
-        let closure_ref_func_ref = closure_ref.clone();
-        let closure = async move {
-            println!("Closing");
-            let mut closure_guard = closure_ref_func_ref.lock().await;
-            *closure_guard = true;
-        };
+        let listener = self.listener.take().unwrap();
 
-        task::spawn(async move {
+        let (shutdown_tx, mut shutdown_rx) = broadcast::channel(1);
+        self.shutdown = Some(shutdown_tx);
+
+        //add the app_task
+        self.app_task = Some(task::spawn(async move {
+            //create a default callback if none.
+            let error_callback = error_callback.unwrap_or(Arc::new(Box::pin(|_| {})));
+
             loop {
+                tokio::select! {
+                    _ = shutdown_rx.recv() => {
+                        break;
+                    },
+                    accepted_client = listener.accept() => {
 
-                let stopped = { *closure_ref.lock().await };
+                        if let Err(e) = accepted_client {
+                            error_callback(e.to_string());
+                            continue;
+                        }
 
-                if stopped {
-                    break;
-                }
+                        let router_ref = router.clone();
+                        let middleware_ref = global_middleware.clone();
 
-                let accepted_client = listener.accept().await;
-
-                if let Err(c_err) = accepted_client {
-                    eprintln!("Failed to connect client: {c_err}");
-                    continue;
-                }
-
-                let router_ref = router.clone();
-                let middleware_ref = global_middleware.clone();
-
-                work_manager
-                    .add_work(Box::pin(async move {
-                        Self::request_work(accepted_client.unwrap(), middleware_ref, router_ref)
+                        work_manager
+                            .add_work(Box::pin(async move {
+                                Self::request_work(accepted_client.unwrap(), middleware_ref, router_ref)
+                                    .await;
+                            }))
                             .await;
-                    }))
-                    .await;
+                    }
+                }
             }
+        }));
 
-            drop(listener);
-        });
+        Ok(AppState::Running)
+    }
 
-        closure
+    /// # close
+    ///
+    /// Closes the web app. 
+    /// 
+    /// You must await this function to join the app handle with this thread.
+    ///
+    /// ## Returns
+    ///
+    /// This function returns:
+    ///
+    /// `Err(AppState::Stopped)` if the application was already closed
+    ///
+    /// or 
+    /// 
+    /// `Ok(AppState::Stopped)` if the application was closed.
+    pub async fn close(&mut self) -> Result<AppState, AppState> {
+        if self.app_task.is_none() {
+            return Err(AppState::Stopped);
+        }
+
+        let task = self.app_task.take().unwrap();
+
+        let closure = self.shutdown.take().unwrap();
+        let _ = closure.send(());
+
+        let _ = task.await;
+        
+        Ok(AppState::Stopped)
     }
 
     /// Executes all logic required to handle a single client request.
@@ -369,7 +412,7 @@ impl App {
                         break;
                     }
                     Middleware::InvalidEmpty(status_code) => {
-                        final_middleware = Some(EmptyResolution::new(status_code));
+                        final_middleware = Some(EmptyResolution::status(status_code).resolve());
                         break;
                     }
                     Middleware::Next => continue,
@@ -483,7 +526,7 @@ impl App {
 
         if let Some(r) = pos_route {
             if r.lock().await.brw_resolution(&method).is_some() {
-                return Err(RoutingError::new(RoutingErrorType::Exist));
+                return Err(RoutingError::Exist);
             }
         }
 
@@ -522,4 +565,30 @@ impl App {
     pub async fn get_router(&self) -> MutexGuard<'_, RouteTree> {
         self.router.lock().await
     }
+
+    /// # Set Error callback
+    ///
+    /// Sets the error callback using a FN closure.
+    ///
+    /// This error callback is used for the App task handle. Allowing you to control how errors are displayed to the user.
+    ///
+    /// This MUST be set before you start the app.
+    pub fn set_error_callback(&mut self, callback: impl Fn(String) -> () + Send + Sync + 'static) {
+        //pin the callback for the error.
+        let callback: Arc<Pin<Box<dyn Fn(String) -> () + Send + Sync>>> =
+            Arc::new(Box::pin(callback));
+        self.error_callback = Some(callback);
+    }
+
+    /// # state
+    ///
+    /// Get the state of the application.
+    pub fn state(&self) -> AppState {
+        match &self.app_task {
+            None => AppState::Stopped,
+            _ => AppState::Running,
+        }
+    }
 }
+
+
