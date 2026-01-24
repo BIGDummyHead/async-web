@@ -8,7 +8,6 @@ To get started all we need is a valid Socket and the tokio package, which can be
 
 ```
 cargo add tokio --features full
-
 ```
 
 To give you the main function attribute for async as will be used in the following examples.
@@ -49,7 +48,7 @@ For example, let's add three different routes, using the three different functio
     // --snip--
     // assume we have bound an app.
 
-    //assume that no_middleware = Option::None
+    let no_middleware = None;
 
     //here we make a call to add_or_change_route, this is pretty explicit with what it will do, note that it returns an error for YOU to handle incase anything is wrong with the provided route
     //you however, do not receive an error if the route exist, as it does not care and will override it.
@@ -60,7 +59,7 @@ For example, let's add three different routes, using the three different functio
             no_middleware, // None
             resolve!(req, {
                 //tell the server to serve a 200 message.
-                EmptyResolution::new(200)
+                EmptyResolution::status(200).resolve()
             }),
         )
         .await;
@@ -71,8 +70,8 @@ For example, let's add three different routes, using the three different functio
         .add_route(
             "/home",
             Method::GET,
-            no_middleware,
-            resolve!(req, { EmptyResolution::new(200) }),
+            None,
+            resolve!(req, { EmptyResolution::status(200).resolve() }),
         )
         .await;
 
@@ -82,8 +81,8 @@ For example, let's add three different routes, using the three different functio
         .add_or_panic(
             "/home",
             Method::POST, //note that we are using a different method
-            no_middleware,
-            resolve!(req, { EmptyResolution::new(200) }),
+            None,
+            resolve!(req, { EmptyResolution::status(200).resolve() }),
         )
         .await;
 ```
@@ -140,7 +139,7 @@ It is to be noted that if the middleware (as will see soon) stops at any point t
         "/admin/home",
         Method::POST, //note that we are using a different method
         middleware!(check_is_admin, has_access), //note how we can reuse the middleware! macro to conjoin our middleware.
-        resolve!(req, { EmptyResolution::new(200) }),
+        resolve!(req, { EmptyResolution::status(200).resolve() }),
     )
     .await;
 
@@ -162,18 +161,38 @@ These will all be covered, but for now let's focus on starting this app.
 
 ```rust
 
-//start the app is simple, however can be confusing with using await
+let worker_count = 100;
+let app = App::bind(worker_count, "127.0.0.1:80").await?; //ensure that the app is bound
 
-//firstly here, we start the app and use the await to invoke the future, this provides us with the spawned task or the 'app_thread"
-let app_thread = app.start().await;
+//add routes
 
-// we may use the app_thread on a separate task, or we can await that thread on our main function to keep the program alive!
-//the power and choice is in your hands on how you want to run the app
-let _ = app_thread.await;
+// if the app starts successfully, the Ok(AppState::Running) is returned,
+// if the app was already running, the Err(AppState::Running) is returned
+let start_res: Result<AppState, AppState> = app.start();
+
+//keep your program alive.
+loop {
+    println!("Enter 'quit' to stop.");
+
+    let mut input = String::new();
+
+    // Read the line from stdin
+    io::stdin()
+        .read_line(&mut input) 
+        .expect("Failed to read line"); 
+
+    if input == "quit" {
+        break;
+    }
+}
+
+//again, this returns just like start
+// we await this future because it sends a signal to close the listener, then joins the app thread until a graceful closure.
+let close_res: Result<AppState, AppState> = app.close().await;
+
+// you must now create a new application.
 
 ```
-
-### More examples to come...
 
 ## Moving Values 
 
@@ -192,28 +211,28 @@ app.add_or_panic(
     None,
     resolve!(req, moves[moved_value, other_moved_value] {
         //it is important to note that moved_value/other_moved_value ARE moved however, they are also cloned. 
-        EmptyResolution::new(200)
+        EmptyResolution::status(200).resolve()
     }),
-    )
-    .await;
+    ).await;
 
 ```
 
 ## Resolving a Route
 
-You may have noticed that `route!` in all the examples use the `EmptyResolution::new(200)` value. Meaning to tell the request 200 (ok) with no content.
+You may have noticed that `route!` in all the examples use the `EmptyResolution::status(200).resolve()` value. Meaning to tell the request 200 (ok) with no content.
 
-However, we use other pre-made resolutions in the library such as:
+However, we use other pre-made resolutions in the library such as, each of these have the `resolve()` function:
 
-* FileTextResolution::new(&str) -> resolved into raw `utf8` text.
-* FileResolution::new(String) -> resolved into `Vec<u8>` and sets appropriate headers.
-* EmptyResolution::new(i32) -> resolves into an empty resolution with the appropriate status header.
-* JsonResolution::new<T>(T) -> Result<Self, serde_json::Error>. This does not directly resolve into a resolution. You must call `into_resolution` 
+* FileResolution::new(&str) ->  creates a stream to the given file that returns the content of the file
+* EmptyResolution::status(i32) -> creates an empty result with a header of the status code
+* ErrorResolution -> see `from_error`, `from_boxed_error`, `from_error_with_config`, `from_boxed_error_with_config`. Essentially, this resolution transforms an `std::error::Error` into a resolution.
+* JsonResolution::serialize<T>(T) -> Result<Self, ErrorResolution>. If the serialization fails, you are passed an error resolution automatically mapped. If it does not you may call `serialized.unwrap().resolve()`
 
-Each of these pre-included resolutions implement the `Resolution` trait. This trait includes 2 functions to implement:
+Each of these pre-included resolutions implement the `Resolution` trait. This trait includes 3 functions to implement:
 
 * `fn get_headers(&self) -> Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>>`
 * `fn get_content(&self) ->  Pin<Box<dyn Stream<Item = Vec<u8>> + Send + 'static>>`
+* `fn resolve(self) -> Box<dyn Resolution + Send + 'static>`
 
 ### Creating a Resolution
 
@@ -253,6 +272,11 @@ impl Resolution for StreamedResolution {
     fn get_headers(&self) -> std::pin::Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>> {
         //Box and pin the function that returns the single status header string.
         Box::pin(async move { vec![get_status_header(200)] })
+    }
+
+    //resolve the function
+    fn resolve(self) -> Box<dyn Resolution + Send + 'static> {
+        Box::new(self)
     }
 
     /// Get Content
@@ -312,7 +336,7 @@ impl Resolution for StreamedResolution {
             let rx = compressed_frame_rx_clone.subscribe();
 
             //return our new resolution
-            StreamedResolution::new(rx)
+            StreamedResolution::new(rx).resolve()
         }),
     )
     .await;
@@ -343,3 +367,4 @@ async function readStream() {
 }
 ```
 
+More to come...
