@@ -71,7 +71,7 @@ impl JsonResolution {
                 status_code: 200,
             })
             .map_err(|e| {
-                ErrorResolution::from_error_with_config(
+                ErrorResolution::from_error(
                     e,
                     super::error_resolution::Configured::Json,
                 )
