@@ -91,12 +91,6 @@ pub struct ErrorResolution {
     config: Configured,
 }
 
-impl Into<Box <dyn Resolution + Send + 'static>> for ErrorResolution {
-    fn into(self) -> Box <dyn Resolution + Send + 'static> {
-        Box::new(self)
-    }
-}
-
 impl ErrorResolution {
 
      /// # From Error With Config
