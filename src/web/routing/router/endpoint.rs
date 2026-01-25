@@ -1,4 +1,4 @@
-use crate::web::routing::{ResolutionFunc, middleware::MiddlewareCollection};
+use crate::web::routing::{ResolutionFnRef, middleware::MiddlewareCollection};
 
 
 /// ## End Point
@@ -15,11 +15,11 @@ use crate::web::routing::{ResolutionFunc, middleware::MiddlewareCollection};
 /// The resolution that is called once the middleware has completed.
 pub struct EndPoint {
     pub middleware: Option<MiddlewareCollection>,
-    pub resolution: ResolutionFunc
+    pub resolution: ResolutionFnRef
 }
 
 impl EndPoint {
-    pub fn new(resolution: ResolutionFunc, middleware: Option<MiddlewareCollection>) -> Self {
+    pub fn new(resolution: ResolutionFnRef, middleware: Option<MiddlewareCollection>) -> Self {
         Self {
             middleware,
             resolution

@@ -12,7 +12,7 @@ pub use self::{
 
 /// ## resolve!
 ///
-/// Shorthand for writing a route resolver!
+/// Shorthand for writing a route resolver.
 ///
 /// ### Common "long"-hand:
 ///

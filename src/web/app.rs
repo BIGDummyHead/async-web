@@ -15,7 +15,7 @@ use crate::web::{
     errors::RoutingError,
     resolution::empty_resolution::EmptyResolution,
     routing::{
-        ResolutionFunc, RouteNodeRef,
+        ResolutionFnRef, RouteNodeRef,
         middleware::{MiddlewareClosure, MiddlewareCollection},
         router::route_tree::RouteTree,
     },
@@ -37,8 +37,11 @@ pub struct App {
     pub work_manager: Arc<WorkManager<()>>,
     pub listener: Option<TcpListener>,
     pub router: Arc<Mutex<RouteTree>>,
+    //middleware that is applied to all routes called
     global_middleware: Arc<Mutex<Vec<MiddlewareClosure>>>,
+    //handled to the spawned task
     app_task: Option<JoinHandle<()>>,
+    //callback to handle errors that in inbound from
     error_callback: Option<Arc<Pin<Box<dyn Fn(String) -> () + Send + Sync + 'static>>>>,
     shutdown: Option<broadcast::Sender<()>>,
 }
@@ -238,13 +241,18 @@ impl App {
     /// This function returns:
     ///
     /// Err(AppState::Running) if the application was already running
-    ///
+    /// Err(AppState::Closed) if the application was closed
     /// or
     ///
     /// Ok(AppState::Running) if the application was started successfully.
     pub fn start(&mut self) -> Result<AppState, AppState> {
         if self.app_task.is_some() {
             return Err(AppState::Running);
+        }
+
+        //err cannot start.
+        if self.listener.is_none() {
+            return Err(AppState::Closed);
         }
 
         // create reference clones to each thing passed to the opened task
@@ -295,22 +303,22 @@ impl App {
 
     /// # close
     ///
-    /// Closes the web app. 
-    /// 
+    /// Closes the web app.
+    ///
     /// You must await this function to join the app handle with this thread.
     ///
     /// ## Returns
     ///
     /// This function returns:
     ///
-    /// `Err(AppState::Stopped)` if the application was already closed
+    /// `Err(AppState::Closed)` if the application was already closed
     ///
-    /// or 
-    /// 
-    /// `Ok(AppState::Stopped)` if the application was closed.
+    /// or
+    ///
+    /// `Ok(AppState::Closed)` if the application was closed.
     pub async fn close(&mut self) -> Result<AppState, AppState> {
         if self.app_task.is_none() {
-            return Err(AppState::Stopped);
+            return Err(AppState::Closed);
         }
 
         let task = self.app_task.take().unwrap();
@@ -319,8 +327,8 @@ impl App {
         let _ = closure.send(());
 
         let _ = task.await;
-        
-        Ok(AppState::Stopped)
+
+        Ok(AppState::Closed)
     }
 
     /// Executes all logic required to handle a single client request.
@@ -390,6 +398,7 @@ impl App {
 
         let endpoint = endpoint_opt.unwrap();
 
+        // middleware_failed_resolution, gives back an Option<Middleware> with some if it failed
         let middleware_failed_resolution = {
             let mut final_middleware = None;
 
@@ -425,7 +434,8 @@ impl App {
         let write_resolution = if let Some(failed_middleware) = middleware_failed_resolution {
             Some(failed_middleware)
         } else {
-            Some((endpoint.resolution)(request.clone()).await)
+            let req_guard: MutexGuard<'_, Request> = request.lock().await;
+            Some((endpoint.resolution)(req_guard).await)
         };
 
         if write_resolution.as_ref().is_none() {
@@ -493,13 +503,22 @@ impl App {
     ///
     /// Returns a `RoutingError` if the route cannot be added.
 
-    pub async fn add_or_change_route(
+    pub async fn add_or_change_route<F, Fut>(
         &self,
         route: &str,
         method: Method,
         middleware: Option<MiddlewareCollection>,
-        resolution: ResolutionFunc,
-    ) -> Result<(), RoutingError> {
+        resolution: F,
+    ) -> Result<(), RoutingError>
+    where
+        F: Fn(MutexGuard<'_, Request>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Box<dyn Resolution + Send + 'static>> + Send + 'static,
+    {
+        let resolution: ResolutionFnRef = Arc::new(move |req: MutexGuard<'_, Request>| {
+            Box::pin(resolution(req))
+                as Pin<Box<dyn Future<Output = Box<dyn Resolution + Send + 'static>> + Send>>
+        });
+
         let endpoint = EndPoint::new(resolution, middleware);
 
         let mut router = self.router.lock().await;
@@ -513,22 +532,29 @@ impl App {
     /// # Errors
     ///
     /// Returns a `RoutingError` if the route cannot be added.
-    pub async fn add_route(
+    pub async fn add_route<F, Fut>(
         &self,
         route: &str,
         method: Method,
         middleware: Option<MiddlewareCollection>,
-        resolution: ResolutionFunc,
-    ) -> Result<(), RoutingError> {
+        resolution: F,
+    ) -> Result<(), RoutingError>
+    where
+        F: Fn(MutexGuard<'_, Request>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Box<dyn Resolution + Send + 'static>> + Send + 'static,
+    {
         let mut router = self.router.lock().await;
 
-        let pos_route = router.get_route(route).await;
-
-        if let Some(r) = pos_route {
-            if r.lock().await.brw_resolution(&method).is_some() {
+        if let Some(rte) = router.get_route(route).await {
+            if rte.lock().await.brw_resolution(&method).is_some() {
                 return Err(RoutingError::Exist);
             }
         }
+
+        let resolution: ResolutionFnRef = Arc::new(move |req: MutexGuard<'_, Request>| {
+            Box::pin(resolution(req))
+                as Pin<Box<dyn Future<Output = Box<dyn Resolution + Send + 'static>> + Send>>
+        });
 
         let endpoint = EndPoint::new(resolution, middleware);
         let route_res = Some((method, endpoint));
@@ -543,13 +569,17 @@ impl App {
     /// Panics if the route already exists or cannot be added.
     /// Intended for use during application initialization.
 
-    pub async fn add_or_panic(
+    pub async fn add_or_panic<F, Fut>(
         &self,
         route: &str,
         method: Method,
         middleware: Option<MiddlewareCollection>,
-        resolution: ResolutionFunc,
-    ) -> () {
+        resolution: F,
+    ) -> ()
+    where
+        F: Fn(MutexGuard<'_, Request>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Box<dyn Resolution + Send + 'static>> + Send + 'static,
+    {
         let result = self.add_route(route, method, middleware, resolution).await;
 
         if let Err(e) = result {
@@ -585,10 +615,8 @@ impl App {
     /// Get the state of the application.
     pub fn state(&self) -> AppState {
         match &self.app_task {
-            None => AppState::Stopped,
+            None => AppState::Closed,
             _ => AppState::Running,
         }
     }
 }
-
-

@@ -4,7 +4,7 @@
 #[derive(Debug)]
 pub enum AppState {
     Running,
-    Stopped
+    Closed
 }
 
 impl std::fmt::Display for AppState {
@@ -12,7 +12,7 @@ impl std::fmt::Display for AppState {
         
         let state = match self {
             Self::Running => "already running",
-            Self::Stopped => "already stopped"
+            Self::Closed => "already closed"
         };
         
         write!(f, "{}", state)

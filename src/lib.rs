@@ -104,9 +104,7 @@ mod tests {
             "/app",
             Method::GET,
             middleware!(m_ware),
-            resolve!(_req, moves[], {
-                EmptyResolution::status(200).resolve()
-            }),
+            |_req| async move { EmptyResolution::status(200).resolve() },
         )
         .await;
 
