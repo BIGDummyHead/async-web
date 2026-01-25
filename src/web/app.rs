@@ -434,8 +434,8 @@ impl App {
         let write_resolution = if let Some(failed_middleware) = middleware_failed_resolution {
             Some(failed_middleware)
         } else {
-            let req_guard: MutexGuard<'_, Request> = request.lock().await;
-            Some((endpoint.resolution)(req_guard).await)
+            
+            Some((endpoint.resolution)(request.clone()).await)
         };
 
         if write_resolution.as_ref().is_none() {
@@ -511,10 +511,10 @@ impl App {
         resolution: F,
     ) -> Result<(), RoutingError>
     where
-        F: Fn(MutexGuard<'_, Request>) -> Fut + Send + Sync + 'static,
+        F: Fn(Arc<Mutex<Request>>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Box<dyn Resolution + Send + 'static>> + Send + 'static,
     {
-        let resolution: ResolutionFnRef = Arc::new(move |req: MutexGuard<'_, Request>| {
+        let resolution: ResolutionFnRef = Arc::new(move |req: Arc<Mutex<Request>>| {
             Box::pin(resolution(req))
                 as Pin<Box<dyn Future<Output = Box<dyn Resolution + Send + 'static>> + Send>>
         });
@@ -540,7 +540,7 @@ impl App {
         resolution: F,
     ) -> Result<(), RoutingError>
     where
-        F: Fn(MutexGuard<'_, Request>) -> Fut + Send + Sync + 'static,
+        F: Fn(Arc<Mutex<Request>>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Box<dyn Resolution + Send + 'static>> + Send + 'static,
     {
         let mut router = self.router.lock().await;
@@ -551,7 +551,7 @@ impl App {
             }
         }
 
-        let resolution: ResolutionFnRef = Arc::new(move |req: MutexGuard<'_, Request>| {
+        let resolution: ResolutionFnRef = Arc::new(move |req: Arc<Mutex<Request>>| {
             Box::pin(resolution(req))
                 as Pin<Box<dyn Future<Output = Box<dyn Resolution + Send + 'static>> + Send>>
         });
@@ -577,7 +577,7 @@ impl App {
         resolution: F,
     ) -> ()
     where
-        F: Fn(MutexGuard<'_, Request>) -> Fut + Send + Sync + 'static,
+        F: Fn(Arc<Mutex<Request>>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Box<dyn Resolution + Send + 'static>> + Send + 'static,
     {
         let result = self.add_route(route, method, middleware, resolution).await;

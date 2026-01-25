@@ -12,7 +12,7 @@ pub use route::Route;
 
 use std::{pin::Pin, sync::Arc};
 
-use tokio::sync::{Mutex, MutexGuard};
+use tokio::sync::Mutex;
 
 use crate::web::{routing::router::route_node::RouteNode};
 
@@ -40,7 +40,7 @@ pub type ResolutionFuture = dyn Future<Output = Box<dyn Resolution + Send + 'sta
 /// };
 /// ```
 pub type ResolutionFn =
-    dyn Fn(MutexGuard<'_, Request>) -> Pin<Box<ResolutionFuture>> + Send + Sync + 'static;
+    dyn Fn(Arc<Mutex<Request>>) -> Pin<Box<ResolutionFuture>> + Send + Sync + 'static;
 
 /// # Resolution Function (FN) Ref
 /// 
