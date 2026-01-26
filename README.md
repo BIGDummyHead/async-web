@@ -57,10 +57,10 @@ For example, let's add three different routes, using the three different functio
             "/home", //change the home page
             Method::GET, //method, GET, POST, PUT, DELETE, etc... with exception to enum item Other(String)
             no_middleware, // None
-            resolve!(req, {
+            |req| async move {
                 //tell the server to serve a 200 message.
                 EmptyResolution::status(200).resolve()
-            }),
+            }
         )
         .await;
 
@@ -71,7 +71,10 @@ For example, let's add three different routes, using the three different functio
             "/home",
             Method::GET,
             None,
-            resolve!(req, { EmptyResolution::status(200).resolve() }),
+            |req| async move {
+                //tell the server to serve a 200 message.
+                EmptyResolution::status(200).resolve()
+            },
         )
         .await;
 
@@ -82,7 +85,10 @@ For example, let's add three different routes, using the three different functio
             "/home",
             Method::POST, //note that we are using a different method
             None,
-            resolve!(req, { EmptyResolution::status(200).resolve() }),
+            |req| async move {
+                //tell the server to serve a 200 message.
+                EmptyResolution::status(200).resolve()
+            },
         )
         .await;
 ```
@@ -139,7 +145,10 @@ It is to be noted that if the middleware (as will see soon) stops at any point t
         "/admin/home",
         Method::POST, //note that we are using a different method
         middleware!(check_is_admin, has_access), //note how we can reuse the middleware! macro to conjoin our middleware.
-        resolve!(req, { EmptyResolution::status(200).resolve() }),
+        |req| async move {
+                //tell the server to serve a 200 message.
+                EmptyResolution::status(200).resolve()
+            },
     )
     .await;
 
@@ -198,6 +207,8 @@ let close_res: Result<AppState, AppState> = app.close().await;
 
 Sometimes we need to move and clones values from one scope to another. However you cannot do this without using the `moves` variable in the `middleware!` and `resolve!` macro.
 
+If we are add a route using the app, however we need to change how the structure of the closure is set up.
+
 ```rust
 
 //this example of moves would work for both middleware!/resolve!
@@ -209,10 +220,14 @@ app.add_or_panic(
     "/admin/home",
     Method::POST, //note that we are using a different method
     None,
-    resolve!(req, moves[moved_value, other_moved_value] {
-        //it is important to note that moved_value/other_moved_value ARE moved however, they are also cloned. 
-        EmptyResolution::status(200).resolve()
-    }),
+    move |req| {
+        let moved_value = moved_value.clone();
+        let 
+        async move {
+            //tell the server to serve a 200 message.
+            EmptyResolution::status(200).resolve()
+        }
+    }
     ).await;
 
 ```
@@ -330,13 +345,15 @@ impl Resolution for StreamedResolution {
         "/stream", //path
         Method::POST,
         None,
-        resolve!(_req, moves[compressed_frame_rx_clone], {
+        move |req| {
+            let compressed_frame_rx_clone = compressed_frame_rx_clone.clone();
+            async move {
+                //create a receiver we can pass to the streamed resolution
+                let rx = compressed_frame_rx_clone.subscribe();
 
-            //create a receiver we can pass to the streamed resolution
-            let rx = compressed_frame_rx_clone.subscribe();
-
-            //return our new resolution
-            StreamedResolution::new(rx).resolve()
+                //return our new resolution
+                StreamedResolution::new(rx).resolve()
+            }
         }),
     )
     .await;
