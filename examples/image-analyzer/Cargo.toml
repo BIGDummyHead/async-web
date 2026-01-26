@@ -4,8 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-tokio = { version = "1", features = ["full"] }
-async-web = { path="../async-web" }
+async-web = { git ="https://github.com/BIGDummyHead/async-web.git" }
 candle-core = { git = "https://github.com/huggingface/candle.git" }
 candle-nn = { git = "https://github.com/huggingface/candle.git" }
 candle-transformers = { git = "https://github.com/huggingface/candle.git" }
@@ -13,4 +12,9 @@ tokenizers = "0.22.2"
 image = "0.25.9"
 hf-hub = { version = "0.4.3", features = ["tokio"] }
 serde = { version = "1.0.228", features = ["derive"] }
+tokio = { version = "1.49.0", features = ["full"] }
+local-ip-address = "0.6.9"
+async-stream = "0.3.6"
+tokio-stream = "0.1.18"
+futures = "0.3.31"
 

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Alt Text Streaming Test</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🖼️ Image Alt Text Generator (Streaming Test)</h1>
+        
+        <div class="upload-area" id="uploadArea">
+            <p>📁 Click to select an image or drag & drop here</p>
+            <p style="font-size: 14px; color: #666;">Supported formats: JPG, PNG, GIF, WebP</p>
+        </div>
+        
+        <input type="file" id="fileInput" accept="image/*">
+        
+        <div class="preview" id="preview"></div>
+        
+        <button id="uploadBtn" disabled>Generate Alt Text</button>
+        
+        <div class="status" id="status"></div>
+        
+        <div id="output"></div>
+    </div>
+
+    <script src="scripts.js" defer></script>
+</body>
+</html>
