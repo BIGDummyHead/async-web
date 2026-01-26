@@ -9,6 +9,11 @@ use std::io::Cursor;
 use crate::model::{Model, load_image_from_data};
 use crate::loaded_model::LoadedModel;
 
+/// Token Output Resolution
+/// 
+/// Serves as a way to take Image data and convert to a stream of tokens that can be served to the user to caption the image.
+/// 
+/// Implements the `Resolution` trait from async_web.
 pub struct TokenOutputResolution {
     file_data: Cursor<Vec<u8>>,
     loaded_model: Arc<Mutex<LoadedModel>>,
@@ -28,8 +33,6 @@ impl Resolution for TokenOutputResolution {
         Box::pin(async move { vec![get_status_header(200)] })
     }
 
-    /// # Generate Alt Text
-    ///
     /// Provided raw image bytes, loads the model and tokenizer.
     ///
     /// If the generation of the alt text was successful it will return the prediction.

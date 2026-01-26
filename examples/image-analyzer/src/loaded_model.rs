@@ -3,7 +3,13 @@ use candle_transformers::{generation::LogitsProcessor, models::{blip, quantized_
 
 use crate::{model::{get_tokenzier, load_model_file}, token_output_stream::TokenOutputStream};
 
+/// # Loaded Model
+/// 
+/// Loads the model and stores important information about the model into the struct.
+/// 
+/// This is used to be shared between request using an Arc<Mutex<>> shared reference.
 pub struct LoadedModel {
+    ///the loaded tokenizer.
     pub tokenizer: TokenOutputStream,
     pub logits_processor: LogitsProcessor,
     pub config: blip::Config,
@@ -11,7 +17,8 @@ pub struct LoadedModel {
 }
 
 impl LoadedModel {
-    pub async fn new() -> Self {
+    /// Create the loaded model to use for request.
+    pub async fn create() -> Self {
         let model_id = "lmz/candle-blip";
         let filename = "blip-image-captioning-large-q4k.gguf";
 

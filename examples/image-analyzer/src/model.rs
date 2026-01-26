@@ -5,6 +5,7 @@ use candle_transformers::models::{blip, quantized_blip};
 use hf_hub::api::tokio::Api;
 use tokenizers::Tokenizer;
 
+/// Basic model implementation from hugging face examples.
 pub enum Model {
     M(blip::BlipForConditionalGeneration),
     Q(quantized_blip::BlipForConditionalGeneration),
@@ -25,6 +26,7 @@ impl Model {
     }
 }
 
+/// loads the image in from file image data 
 pub async fn load_image_from_data(
     file_data: Cursor<Vec<u8>>,
 ) -> Result<Tensor, Box<dyn std::error::Error>> {
@@ -64,6 +66,7 @@ pub async fn load_model_file(
     Ok(tokenzier)
 }
 
+/// get's the hugging face tokenizer.
 pub async fn get_tokenzier() -> Result<Tokenizer, Box<dyn std::error::Error>> {
     let api = Api::new()?;
 
