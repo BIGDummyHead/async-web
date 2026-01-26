@@ -234,7 +234,7 @@ app.add_or_panic(
 
 ## Resolving a Route
 
-You may have noticed that `route!` in all the examples use the `EmptyResolution::status(200).resolve()` value. Meaning to tell the request 200 (ok) with no content.
+You may have noticed that all the examples use the `EmptyResolution::status(200).resolve()` value. Meaning to tell the request 200 (ok) with no content.
 
 However, we use other pre-made resolutions in the library such as, each of these have the `resolve()` function:
 
@@ -384,4 +384,182 @@ async function readStream() {
 }
 ```
 
-More to come...
+A great example, can be found in the examples folder under [image analyzer](https://github.com/BIGDummyHead/async-web/tree/master/examples/image-analyzer/src)
+
+This example uses each and every part of the App, from basic file serving, implementing middleware, and implementing a custom token output resolution.
+
+This example has the capability to take in a image from the body of the request and return a stream of characters that caption the image.
+
+Let's take a look.
+
+## Limiting API Calls (Middleware)
+
+```rust
+
+let limit_api_calls = middleware!(req, moves[api_calls_clone], {
+        let ip_addr: String = {
+            let guard: MutexGuard<'_, Request> = req.lock().await;
+
+            match guard.client_socket {
+                std::net::SocketAddr::V4(addr) => addr.ip().to_string(),
+                std::net::SocketAddr::V6(addr) => addr.ip().to_string(),
+            }
+        };
+
+        // ! remember to drop the lock.
+        let mut api_guard = api_calls_clone.lock().await;
+
+        //insert a new handler to the map
+        if !api_guard.contains_key(&ip_addr) {
+            //2 calls per minute. 120 calls per hour.
+            let max_calls = 2;
+            let time_frame = std::time::Duration::from_mins(1);
+            api_guard.insert(ip_addr.clone(), ApiHandler::new(max_calls, time_frame));
+        }
+
+        //get the api call, this should be expected to always have the IP address.
+        let api_handle: Result<Middleware, Middleware> =  
+        api_guard
+        .get_mut(&ip_addr)
+        .unwrap()
+        .make_call() 
+        .map_err(|e| {
+            Middleware::Invalid(ErrorResolution::from_error(e, Configured::Json).resolve())
+        })
+        .map(|_| Middleware::Next);
+
+        //drop the api calls lock
+        drop(api_guard);
+
+        api_handle.unwrap_or_else(|m| m)
+    });
+```
+
+The [API Handler](https://github.com/BIGDummyHead/async-web/blob/master/examples/image-analyzer/src/api_call.rs) is a struct that allows us to limit how many times the API can be called within a timeframe.
+
+`Note: This struct is not apart of the library`
+
+You will see that the Middleware will only continue if the user has made less than 2 calls withing the last minute.
+
+We will then use this API limiter for heavier calls for example
+
+## Caption Image Route (POST Example with middleware)
+
+```rust
+
+app.add_or_panic(
+        "/alt",
+        Method::POST,
+        middleware!(limit_api_calls),
+        move |req| {
+            //load in the model for usage.
+            let loaded_model = loaded_model.clone();
+            async move {
+                // take the request body, don't want to really copy it
+                let body = {
+                    let mut guard = req.lock().await;
+                    std::mem::take(&mut guard.body)
+                };
+
+                //tell the frontend that the request body was empty.
+                if body.is_empty() {
+                    return ErrorResolution::from_error(std::io::Error::new(std::io::ErrorKind::InvalidData, "Request body is empty"), Configured::Json).resolve();
+                }
+
+                let file_data = Cursor::new(body);
+
+                //send the file data and loaded model and create a streamed output from the image captioner.
+                let result = tokio::task::spawn_blocking(move || {
+                    TokenOutputResolution::stream(file_data, loaded_model).resolve()
+                })
+                .await
+                .map_err(|e| ErrorResolution::from_error(e, Configured::PlainText).resolve());
+
+                result.unwrap_or_else(|r| r)
+            }
+        },
+    )
+    .await;
+
+```
+
+In this POST example, the `/alt` route retrieves the body of the request and passes it to the `TokenOutputResolution::stream` function, which returns a custom implementation of the `Resolution` trait.
+
+## Resolution Trait Implementation
+
+```rust
+impl Resolution for TokenOutputResolution {
+    fn get_headers(&self) -> std::pin::Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>> {
+        Box::pin(async move { vec![get_status_header(200)] })
+    }
+
+    /// Provided raw image bytes, loads the model and tokenizer.
+    ///
+    /// If the generation of the alt text was successful it will return the prediction.
+    fn get_content(&self) -> std::pin::Pin<Box<dyn Stream<Item = Vec<u8>> + Send>> {
+        let loaded_model = self.loaded_model.clone();
+
+        let file_data = self.file_data.clone();
+
+        let content_stream = stream! {
+
+            let device = Device::Cpu;
+
+            let image = load_image_from_data(file_data)
+                .await
+                .unwrap()
+                .to_device(&device)
+                .unwrap();
+
+            let model = {
+                let guard = loaded_model.lock().await;
+                guard.model.clone()
+            };
+
+            let image_embeds = image.unsqueeze(0).unwrap().apply(model.vision_model()).unwrap();
+
+            let mut model = Model::Q(model);
+
+
+            let sep_token_id: u32 = 102;
+
+            let mut token_ids = vec![30522u32];
+            for index in 0..1000 {
+                let context_size = if index > 0 { 1 } else { token_ids.len() };
+                let start_pos = token_ids.len().saturating_sub(context_size);
+                let input_ids = Tensor::new(&token_ids[start_pos..], &device).unwrap().unsqueeze(0).unwrap();
+                let logits = model.text_decoder_forward(&input_ids, &image_embeds).unwrap();
+                let logits = logits.squeeze(0).unwrap();
+                let logits = logits.get(logits.dim(0).unwrap() - 1).unwrap();
+                let token = loaded_model.lock().await.logits_processor.sample(&logits).unwrap();
+
+                if token == sep_token_id {
+                    break;
+                }
+
+                token_ids.push(token);
+                if let Some(t) = loaded_model.lock().await.tokenizer.next_token(token).unwrap() {
+                    yield t.into_bytes();
+                }
+            }
+
+            if let Some(rest) = loaded_model.lock().await.tokenizer
+                .decode_rest()
+                .unwrap()
+            {
+                yield rest.into_bytes();
+            }
+        };
+
+        Box::pin(content_stream)
+    }
+
+    fn resolve(self) -> Box<dyn Resolution + Send + 'static> {
+        Box::new(self)
+    }
+}
+```
+
+In this example, we take the content of that image, pass into our image captioning model, then turn the token string into bytes and yields it back to the server.
+
+Try out this example to generate alt text for your images using something like Postman, or accessing the homepage of the server and using the frontend implementation.
