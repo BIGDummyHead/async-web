@@ -6,7 +6,7 @@ use tokio::sync::{
     mpsc::{self, Receiver, Sender},
 };
 
-use crate::factory::{Queue, Worker};
+use crate::factory::{Queue, Worker, queue::QueueState, worker};
 
 /// # Work Manager
 ///
@@ -18,12 +18,16 @@ where
 {
     /// The amount of workers started on creation.
     size: usize,
+
     /// The sender to clone for the receiver
     pub sender: Sender<R>,
+
     ///The receiver, used to get incoming data from workers.
     pub receiver: Arc<Mutex<Receiver<R>>>,
+
     /// Vec of created workers
     workers: Vec<Worker<R>>,
+
     /// Work to complete. Async work that returns the R type given
     work: Arc<Queue<Pin<Box<dyn Future<Output = R> + Send + 'static>>>>,
 }
@@ -41,34 +45,22 @@ where
     /// For example this allows us to distribute a batch of work.
     ///
     /// Assume that we make a WorkManager of 100 workers and 200 task come in, each worker will assume a task, run, finish, and take another task.
-    pub async fn new(size: usize) -> Self {
-        let (tx, rx) = mpsc::channel(size);
+    pub async fn new(init_size: usize) -> Self {
+        let (tx, rx) = mpsc::channel(init_size);
 
         let receiver = Arc::new(Mutex::new(rx));
 
         let work = Arc::new(Queue::new());
 
-        let workers = Self::create_workers(size, &tx, &work).await;
+        let workers = Self::create_workers(init_size, &tx, &work).await;
 
         Self {
-            size,
+            size: init_size,
             sender: tx,
             receiver,
             workers,
             work,
         }
-    }
-
-    /// Returns the amount of workers this manager uses. NOT the size that was initially used.
-    pub fn worker_count(&self) -> usize {
-        self.workers.len()
-    }
-
-    /// # Worker Errors
-    ///
-    /// Returns the count of errors that occurred when creating workers.
-    pub fn worker_errors(&self) -> usize {
-        self.size - self.worker_count()
     }
 
     /// # create workers
@@ -77,20 +69,20 @@ where
     ///
     /// It is important to note that if the worker upon creation experiences an error it is not captured. And the reference is dropped.
     async fn create_workers(
-        size: usize,
-        sender: &Sender<R>,
-        work: &Arc<Queue<Pin<Box<dyn Future<Output = R> + Send + 'static>>>>,
+        worker_count: usize,
+        data_send: &Sender<R>,
+        work_load: &Arc<Queue<Pin<Box<dyn Future<Output = R> + Send + 'static>>>>,
     ) -> Vec<Worker<R>> {
         // work start futures
         let mut work_futs = vec![];
 
         // for the size of workers
-        for _ in 0..size {
+        for _ in 0..worker_count {
             //clone the sender
-            let data_sender = sender.clone();
+            let data_sender = data_send.clone();
 
             //clone the work queue
-            let work_queue = work.clone();
+            let work_queue = work_load.clone();
 
             let mut worker = Worker::new(data_sender, work_queue);
 
@@ -110,9 +102,38 @@ where
             .collect()
     }
 
-    /// Add work to the queue for workers to complete.
-    pub async fn add_work(&self, work: Pin<Box<dyn Future<Output = R> + Send + 'static>>) -> () {
+    /// # queue work
+    /// 
+    /// Queues work with the given future.
+    pub async fn queue_work(&self, work: Pin<Box<dyn Future<Output = R> + Send + 'static>>) -> QueueState {
         self.work.queue(work).await
+    }
+
+
+    /// # scale workers
+    /// 
+    /// Scales the worker count by the given factor.
+    /// 
+    /// For example, if the current workers are set to a size of 10 and the scale factor is 10
+    /// 
+    /// 90 workers are created, started, and set to the worker Vec.
+    pub async fn scale_workers(&mut self, scale_factor: usize) -> () {
+
+        //sizes and scalers.
+        let current_size = self.size;
+        let new_size = current_size * scale_factor;
+
+        //create new workers with the difference.
+        let mut new_workers = Self::create_workers(new_size - current_size, &self.sender, &self.work).await;
+
+        //move the workers from one container to another.
+        let mut worker_container = Vec::with_capacity(new_size);
+        worker_container.append(&mut self.workers);
+        worker_container.append(&mut new_workers);
+
+        //set the new workers.
+        self.size = worker_container.len();
+        self.workers = worker_container;
     }
 
     /// Close all workers, the queue, and wait for them to finish
@@ -125,5 +146,12 @@ where
         }
 
         join_all(close_futs).await;
+    }
+
+    /// # size
+    /// 
+    /// Returns the size of current workers.
+    pub fn size(&self) -> usize {
+        self.size
     }
 }

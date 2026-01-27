@@ -2,6 +2,15 @@ use std::sync::Arc;
 
 use tokio::sync::{Mutex, Notify};
 
+/// # Queue State
+/// 
+/// The state of the queue, either free or blocked.
+pub enum QueueState {
+    /// The queue was free and inserted successfully
+    Free, 
+    /// The queue was blocked and could not insert
+    Blocked
+}
 
 /// ## Queue
 /// 
@@ -38,11 +47,18 @@ impl<R> Queue<R> {
     }
 
     /// Queue a value
-    pub async fn queue(&self, value: R) -> () {
+    pub async fn queue(&self, value: R) -> QueueState  {
         let mut work = self.work.lock().await;
+
+        //the work has blocked.
+        if work.len() > 1 {
+            return QueueState::Blocked;
+        }
 
         work.push(value);
         self.deque_lock.notify_one();
+
+        QueueState::Free
     }
 
     async fn try_deque(&self) -> Option<R> {
@@ -65,7 +81,6 @@ impl<R> Queue<R> {
 
         loop {
 
-            
             if let Some(is_closed_ref) = &closure {
                 if *is_closed_ref.lock().await {
                     return None;

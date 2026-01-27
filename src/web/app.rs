@@ -52,7 +52,7 @@ pub struct App {
     shutdown: Option<broadcast::Sender<()>>,
 
     /// reference to the work manager to control workers.
-    work_manager: Arc<WorkManager<()>>,
+    work_manager: Arc<Mutex<WorkManager<()>>>,
 }
 
 /// Represents a web application where you can bind, route, and do other web server related activities.
@@ -83,14 +83,15 @@ impl App {
     /////try bind socket.
     ///let app_bind = App::bind(workers, SocketAddrV4::new(addr, port)).await;
     /// ```
-    pub async fn bind<A>(worker_count: usize, addr: A) -> Result<Self, std::io::Error>
+    pub async fn bind<A>(addr: A) -> Result<Self, std::io::Error>
     where
         A: ToSocketAddrs,
     {
         //bind our tcp listener to handle request.
         let bind_result = TcpListener::bind(addr).await?;
 
-        let work_manager = Arc::new(WorkManager::new(worker_count).await);
+        let initial_workers_size: usize = 1;
+        let work_manager = Arc::new(Mutex::new(WorkManager::new(initial_workers_size).await));
 
         let listener = Some(bind_result);
         let router = Arc::new(Mutex::new(RouteTree::new(None)));
@@ -117,9 +118,12 @@ impl App {
     /// Prevents the internal work channel from filling and blocking producers.
     ///
     /// Runs until the receiver channel is closed.
-
     async fn consume(&self) -> JoinHandle<()> {
-        let receiver = self.work_manager.receiver.clone();
+        let receiver = {
+            let guard = self.work_manager.lock().await;
+
+            guard.receiver.clone()
+        };
 
         task::spawn(async move {
             let mut rx = receiver.lock().await;
@@ -184,8 +188,11 @@ impl App {
                         let middleware_ref = global_middleware.clone();
 
                         let error_callback = error_callback.clone();
-                        work_manager
-                            .add_work(Box::pin(async move {
+
+                        println!("some work in ");
+                        let mut work_manager = work_manager.lock().await;
+                        let q_result: crate::factory::queue::QueueState = work_manager
+                            .queue_work(Box::pin(async move {
                                 let completed_work = handle_client_request(accepted_client.unwrap(), middleware_ref, router_ref)
                                     .await;
 
@@ -194,6 +201,15 @@ impl App {
                                 }
                             }))
                             .await;
+
+
+                        if let crate::factory::queue::QueueState::Blocked = q_result {
+                            println!("scaled!");
+                            let scale_size = 10;
+                            work_manager.scale_workers(scale_size).await;
+                        }
+
+                        drop(work_manager);
                     }
                 }
             }
@@ -230,6 +246,33 @@ impl App {
         let _ = task.await;
 
         Ok(AppState::Closed)
+    }
+
+    /// # close
+    /// 
+    /// Closes the web app but does not join with the app handle to ensure that the app was closed.
+    /// 
+    /// Only use this function if you are not in a async environment.
+    /// 
+    /// Otherwise, use the `close` function.
+    /// 
+    /// ## Returns
+    /// 
+    /// This function returns:
+    /// 
+    /// Ok(()) if the app successfully sent a notification to the app thread to stop.
+    /// 
+    /// Err(AppState) if the app was already closed OR if the app failed to send a notification to stop the app thread.
+    pub fn close_unchecked(&mut self) -> Result<(), AppState> {
+
+        if self.app_task.is_none() {
+            return Err(AppState::Closed);
+        }
+
+        let _ = self.app_task.take();
+        let _ = self.shutdown.take().unwrap().send(()).map_err(|_| AppState::Running)?;
+
+        Ok(())
     }
 
     /// Adds a new route or replaces an existing route’s resolution for the given method.
@@ -351,6 +394,14 @@ impl App {
             None => AppState::Closed,
             _ => AppState::Running,
         }
+    }
+}
+
+
+impl Drop for App {
+    /// Drops when the application goes out of scope. This is equivalent to calling (&mut self).close
+    fn drop(&mut self) {
+        let _ = self.close();
     }
 }
 
@@ -589,3 +640,5 @@ async fn resolve(
 
     Ok(())
 }
+
+

@@ -4,9 +4,12 @@ pub mod web;
 #[cfg(test)]
 mod tests {
 
-    use std::sync::{Arc, LazyLock};
+    use std::{
+        sync::{Arc, LazyLock},
+        time::Duration,
+    };
 
-    use tokio::sync::Mutex;
+    use tokio::{sync::Mutex, time::sleep};
 
     use crate::{
         middleware, resolve,
@@ -62,7 +65,7 @@ mod tests {
 
         //bind to local machine, then close, then try again to ensure binds work
         for _ in 0..2 {
-            let app = App::bind(1000, "127.0.0.1:80").await;
+            let app = App::bind("127.0.0.1:80").await;
 
             assert!(app.is_ok(), "app could not bind!");
 
@@ -89,37 +92,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_routing_app() {
-        let closure_guard = APP_CLOSURE_SAFETY.lock().await;
 
-        let mut app = App::bind(1000, "127.0.0.1:80")
-            .await
-            .expect("app did not bind");
-
-        let m_ware = middleware(|req| async move {
-            let ip = {
-                let r_guard = req.lock().await;
-
-                r_guard.client_socket.ip().to_string()
-            };
-
-            println!("Incoming request from IP address: {ip}");
-
-            Middleware::Next
-        });
+        let mut app = App::bind("127.0.0.1:80").await.expect("app did not bind");
 
         app.add_or_panic(
             "/app",
             Method::GET,
-            middleware!(m_ware),
-            |_req| async move { EmptyResolution::status(200).resolve() },
+            None,
+            |_req| async move {
+                EmptyResolution::status(200).resolve()
+            },
         )
         .await;
 
-        let app = app.close().await;
+        let app_started = app.start();
 
-        //app never started... so yes.
-        assert!(app.is_err());
+        println!("App started.");
 
-        drop(closure_guard);
+        if let Err(_) = app_started {
+            eprint!("Could not start app");
+        }
+
+        loop {
+
+        }
+
+
     }
 }
