@@ -1,15 +1,17 @@
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_web::middleware;
 use async_web::web::errors::AppState;
 use async_web::web::resolution::empty_resolution::EmptyResolution;
 use async_web::web::resolution::error_resolution::{Configured, ErrorResolution};
 use async_web::web::resolution::file_resolution::FileResolution;
-use async_web::web::{App, Method, Middleware, Request, Resolution};
+use async_web::web::{App, Method, Middleware, Request, Resolution, middleware};
 use local_ip_address::local_ip;
 use tokio::sync::{Mutex, MutexGuard};
+use tokio::time::sleep;
 
 pub mod api_call;
 pub mod loaded_model;
@@ -17,7 +19,7 @@ pub mod model;
 pub mod token_output_resolution;
 pub mod token_output_stream;
 
-use crate::api_call::{ApiHandler};
+use crate::api_call::ApiHandler;
 
 use crate::loaded_model::LoadedModel;
 use crate::token_output_resolution::TokenOutputResolution;
@@ -40,10 +42,10 @@ async fn main() -> Result<(), AppState> {
     Ok(())
 }
 
-/// Creates a local app on the current IP address on port 80. 
-/// 
+/// Creates a local app on the current IP address on port 80.
+///
 /// Then routes the application with the following routes:
-/// 
+///
 /// POST: /alt -> with body -> caption an image.
 /// GET: / -> public/index.html
 /// GET: /{file} -> public/{file}
@@ -55,9 +57,7 @@ async fn route_app() -> App {
 
     println!("Hosting on: http://{address}");
 
-    let worker_count = 9000;
-
-    let app = App::bind(worker_count, &address)
+    let app = App::bind(&address)
         .await
         .expect("App failed to bind to address.");
 
@@ -65,45 +65,47 @@ async fn route_app() -> App {
 
     //api calls that have happened.
     let api_calls: Arc<Mutex<HashMap<String, ApiHandler>>> = Arc::new(Mutex::new(HashMap::new()));
-    let api_calls_clone = api_calls.clone();
+
 
     // middleware that ensures the user cannot make a ridiculous amount of calls per hour.
-    let limit_api_calls = middleware!(req, moves[api_calls_clone], {
-        let ip_addr: String = {
-            let guard: MutexGuard<'_, Request> = req.lock().await;
+    let limit_api_calls = middleware(move |req| {
+        let api_calls_clone = api_calls.clone();
+        async move {
+            let ip_addr: String = {
+                let guard: MutexGuard<'_, Request> = req.lock().await;
 
-            match guard.client_socket {
-                std::net::SocketAddr::V4(addr) => addr.ip().to_string(),
-                std::net::SocketAddr::V6(addr) => addr.ip().to_string(),
+                match guard.client_socket {
+                    std::net::SocketAddr::V4(addr) => addr.ip().to_string(),
+                    std::net::SocketAddr::V6(addr) => addr.ip().to_string(),
+                }
+            };
+
+            // ! remember to drop the lock.
+            let mut api_guard = api_calls_clone.lock().await;
+
+            //insert a new handler to the map
+            if !api_guard.contains_key(&ip_addr) {
+                //2 calls per minute. 120 calls per hour.
+                let max_calls = 2;
+                let time_frame = std::time::Duration::from_mins(1);
+                api_guard.insert(ip_addr.clone(), ApiHandler::new(max_calls, time_frame));
             }
-        };
 
-        // ! remember to drop the lock.
-        let mut api_guard = api_calls_clone.lock().await;
+            //get the api call, this should be expected to always have the IP address.
+            let api_handle: Result<Middleware, Middleware> = api_guard
+                .get_mut(&ip_addr)
+                .unwrap()
+                .make_call()
+                .map_err(|e| {
+                    Middleware::Invalid(ErrorResolution::from_error(e, Configured::Json).resolve())
+                })
+                .map(|_| Middleware::Next);
 
-        //insert a new handler to the map
-        if !api_guard.contains_key(&ip_addr) {
-            //2 calls per minute. 120 calls per hour.
-            let max_calls = 2;
-            let time_frame = std::time::Duration::from_mins(1);
-            api_guard.insert(ip_addr.clone(), ApiHandler::new(max_calls, time_frame));
+            //drop the api calls lock
+            drop(api_guard);
+
+            api_handle.unwrap_or_else(|m| m)
         }
-
-        //get the api call, this should be expected to always have the IP address.
-        let api_handle: Result<Middleware, Middleware> =  
-        api_guard
-        .get_mut(&ip_addr)
-        .unwrap()
-        .make_call() 
-        .map_err(|e| {
-            Middleware::Invalid(ErrorResolution::from_error(e, Configured::Json).resolve())
-        })
-        .map(|_| Middleware::Next);
-
-        //drop the api calls lock
-        drop(api_guard);
-
-        api_handle.unwrap_or_else(|m| m)
     });
 
     //post resolution that takes a body (image data) and gives back a stream of strings (tokens) to caption said image bytes.
@@ -116,13 +118,13 @@ async fn route_app() -> App {
             let loaded_model = loaded_model.clone();
             async move {
                 // take the request body, don't want to really copy it
-                let body = {
+                let mut body = {
                     let mut guard = req.lock().await;
                     std::mem::take(&mut guard.body)
                 };
 
                 //tell the frontend that the request body was empty.
-                if body.is_empty() {
+                if body.is_none() {
                     return ErrorResolution::from_error(
                         std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
@@ -133,7 +135,7 @@ async fn route_app() -> App {
                     .resolve();
                 }
 
-                let file_data = Cursor::new(body);
+                let file_data = Cursor::new(body.take().unwrap());
 
                 //send the file data and loaded model and create a streamed output from the image captioner.
                 let result = tokio::task::spawn_blocking(move || {
@@ -150,6 +152,7 @@ async fn route_app() -> App {
 
     //homepage
     app.add_or_change_route("/", Method::GET, None, |_req| async move {
+        sleep(Duration::from_secs(10)).await;
         FileResolution::new("public/index.html").resolve()
     })
     .await

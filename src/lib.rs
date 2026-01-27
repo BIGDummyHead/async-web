@@ -4,18 +4,15 @@ pub mod web;
 #[cfg(test)]
 mod tests {
 
-    use std::{
-        sync::{Arc, LazyLock},
-        time::Duration,
-    };
+    use std::sync::{Arc, LazyLock};
 
-    use tokio::{sync::Mutex, time::sleep};
+    use tokio::sync::Mutex;
 
     use crate::{
-        middleware, resolve,
+        resolve,
         web::{
-            App, EndPoint, Method, Middleware, Resolution, middleware,
-            resolution::empty_resolution::EmptyResolution, routing::router::route_tree::RouteTree,
+            App, EndPoint, Method, Resolution, resolution::empty_resolution::EmptyResolution,
+            routing::router::route_tree::RouteTree,
         },
     };
 
@@ -93,30 +90,15 @@ mod tests {
     #[tokio::test]
     async fn test_routing_app() {
 
-        let mut app = App::bind("127.0.0.1:80").await.expect("app did not bind");
+        let closure_guard = APP_CLOSURE_SAFETY.lock().await;
 
-        app.add_or_panic(
-            "/app",
-            Method::GET,
-            None,
-            |_req| async move {
-                EmptyResolution::status(200).resolve()
-            },
-        )
+        let app = App::bind("127.0.0.1:80").await.expect("app did not bind");
+
+        app.add_or_panic("/app", Method::GET, None, |_req| async move {
+            EmptyResolution::status(200).resolve()
+        })
         .await;
 
-        let app_started = app.start();
-
-        println!("App started.");
-
-        if let Err(_) = app_started {
-            eprint!("Could not start app");
-        }
-
-        loop {
-
-        }
-
-
+        drop(closure_guard);
     }
 }

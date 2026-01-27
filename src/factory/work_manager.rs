@@ -6,7 +6,7 @@ use tokio::sync::{
     mpsc::{self, Receiver, Sender},
 };
 
-use crate::factory::{Queue, Worker, queue::QueueState, worker};
+use crate::factory::{Queue, Worker, queue::QueueState};
 
 /// # Work Manager
 ///
@@ -105,7 +105,7 @@ where
     /// # queue work
     /// 
     /// Queues work with the given future.
-    pub async fn queue_work(&self, work: Pin<Box<dyn Future<Output = R> + Send + 'static>>) -> QueueState {
+    pub async fn queue_work(&self, work: Pin<Box<dyn Future<Output = R> + Send + 'static>>) -> QueueState::<Pin<Box<dyn Future<Output = R> + Send + 'static>>> {
         self.work.queue(work).await
     }
 

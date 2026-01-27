@@ -53,6 +53,13 @@ pub struct App {
 
     /// reference to the work manager to control workers.
     work_manager: Arc<Mutex<WorkManager<()>>>,
+
+    /// Worker Scale Factor
+    ///
+    /// The factor at which the workers will scale when the workload becomes too intense.
+    ///
+    /// By default (10)
+    pub worker_scale_factor: Arc<Mutex<usize>>,
 }
 
 /// Represents a web application where you can bind, route, and do other web server related activities.
@@ -77,11 +84,8 @@ impl App {
     ///let addr = Ipv4Addr::new(127, 0, 0, 1);
     ///let port = 8080;
     ///
-    /// //the count of wokrers to make
-    ///let workers = 100;
-    ///
     /////try bind socket.
-    ///let app_bind = App::bind(workers, SocketAddrV4::new(addr, port)).await;
+    ///let app_bind = App::bind(SocketAddrV4::new(addr, port)).await;
     /// ```
     pub async fn bind<A>(addr: A) -> Result<Self, std::io::Error>
     where
@@ -104,6 +108,7 @@ impl App {
             app_task: None,
             error_callback: None,
             shutdown: None,
+            worker_scale_factor: Arc::new(Mutex::new(10)),
         };
 
         bind.consume().await;
@@ -160,12 +165,18 @@ impl App {
         let router = self.router.clone();
         let global_middleware = self.global_middleware.clone();
 
+        //error call back clone
         let error_callback = self.error_callback.as_ref().map(|cb| cb.clone());
 
+        //listener
         let listener = self.listener.take().unwrap();
 
+        //shutdown sender/receiver.
         let (shutdown_tx, mut shutdown_rx) = broadcast::channel(1);
         self.shutdown = Some(shutdown_tx);
+
+        //scaling
+        let scale_factor_clone = self.worker_scale_factor.clone();
 
         //add the app_task
         self.app_task = Some(task::spawn(async move {
@@ -179,37 +190,57 @@ impl App {
                     },
                     accepted_client = listener.accept() => {
 
+                        //failed to accept the client send the error to the callback
                         if let Err(e) = accepted_client {
                             error_callback(e.to_string());
                             continue;
                         }
 
+                        //get refs for the worker.
                         let router_ref = router.clone();
                         let middleware_ref = global_middleware.clone();
-
                         let error_callback = error_callback.clone();
 
-                        println!("some work in ");
-                        let mut work_manager = work_manager.lock().await;
-                        let q_result: crate::factory::queue::QueueState = work_manager
-                            .queue_work(Box::pin(async move {
-                                let completed_work = handle_client_request(accepted_client.unwrap(), middleware_ref, router_ref)
-                                    .await;
+                        //get work that needs to be completed.
+                        let mut current_work = Box::pin(
+                            async move {
 
+                                //handle the client request
+                                let completed_work =
+                                    handle_client_request(accepted_client.unwrap(), middleware_ref, router_ref).await;
+
+                                //handle any errors
                                 if let Err(e) = completed_work {
                                     error_callback(e.to_string());
                                 }
-                            }))
-                            .await;
+                            }
+                        ) as Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+                        //loop, needed to ensure that work is queued properly. please see below
+                        loop {
+
+                            //lock the work managet
+                            let mut work_manager = work_manager.lock().await;
+
+                            //queue some work
+                            match work_manager.queue_work(current_work).await {
+                                crate::factory::queue::QueueState::Free => break, //work was successfully added to the queue (enough workers)
+                                crate::factory::queue::QueueState::Blocked(returned_work) => { //the queue was blocked (no workers) this gives us back the work that was not queued.
+                                    current_work = returned_work;
+
+                                    //scale our worker count.
+                                    let scale_factor = *scale_factor_clone.lock().await;
+                                    work_manager.scale_workers(scale_factor).await;
+
+                                    drop(work_manager);
+
+                                    //hand control back to the async controller.
+                                    tokio::task::yield_now().await;
+                                }
+                            };
 
 
-                        if let crate::factory::queue::QueueState::Blocked = q_result {
-                            println!("scaled!");
-                            let scale_size = 10;
-                            work_manager.scale_workers(scale_size).await;
                         }
-
-                        drop(work_manager);
                     }
                 }
             }
@@ -249,28 +280,32 @@ impl App {
     }
 
     /// # close
-    /// 
+    ///
     /// Closes the web app but does not join with the app handle to ensure that the app was closed.
-    /// 
+    ///
     /// Only use this function if you are not in a async environment.
-    /// 
+    ///
     /// Otherwise, use the `close` function.
-    /// 
+    ///
     /// ## Returns
-    /// 
+    ///
     /// This function returns:
-    /// 
+    ///
     /// Ok(()) if the app successfully sent a notification to the app thread to stop.
-    /// 
+    ///
     /// Err(AppState) if the app was already closed OR if the app failed to send a notification to stop the app thread.
     pub fn close_unchecked(&mut self) -> Result<(), AppState> {
-
         if self.app_task.is_none() {
             return Err(AppState::Closed);
         }
 
         let _ = self.app_task.take();
-        let _ = self.shutdown.take().unwrap().send(()).map_err(|_| AppState::Running)?;
+        let _ = self
+            .shutdown
+            .take()
+            .unwrap()
+            .send(())
+            .map_err(|_| AppState::Running)?;
 
         Ok(())
     }
@@ -396,7 +431,6 @@ impl App {
         }
     }
 }
-
 
 impl Drop for App {
     /// Drops when the application goes out of scope. This is equivalent to calling (&mut self).close
@@ -640,5 +674,3 @@ async fn resolve(
 
     Ok(())
 }
-
-

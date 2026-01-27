@@ -124,10 +124,8 @@ dependencies = [
 [[package]]
 name = "async-web"
 version = "0.1.0"
-source = "git+https://github.com/BIGDummyHead/async-web.git#ff41fe5c7f63fe63e40be9e5e96d41c2b20d19d7"
 dependencies = [
  "async-stream",
- "bytes",
  "futures",
  "serde",
  "serde_json",

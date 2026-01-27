@@ -5,11 +5,11 @@ use tokio::sync::{Mutex, Notify};
 /// # Queue State
 /// 
 /// The state of the queue, either free or blocked.
-pub enum QueueState {
+pub enum QueueState<R> {
     /// The queue was free and inserted successfully
     Free, 
     /// The queue was blocked and could not insert
-    Blocked
+    Blocked(R)
 }
 
 /// ## Queue
@@ -47,12 +47,12 @@ impl<R> Queue<R> {
     }
 
     /// Queue a value
-    pub async fn queue(&self, value: R) -> QueueState  {
+    pub async fn queue(&self, value: R) -> QueueState::<R>  {
         let mut work = self.work.lock().await;
 
         //the work has blocked.
         if work.len() > 1 {
-            return QueueState::Blocked;
+            return QueueState::Blocked(value)
         }
 
         work.push(value);
