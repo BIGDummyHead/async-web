@@ -66,7 +66,6 @@ async fn route_app() -> App {
     //api calls that have happened.
     let api_calls: Arc<Mutex<HashMap<String, ApiHandler>>> = Arc::new(Mutex::new(HashMap::new()));
 
-
     // middleware that ensures the user cannot make a ridiculous amount of calls per hour.
     let limit_api_calls = middleware(move |req| {
         let api_calls_clone = api_calls.clone();
@@ -118,13 +117,19 @@ async fn route_app() -> App {
             let loaded_model = loaded_model.clone();
             async move {
                 // take the request body, don't want to really copy it
-                let mut body = {
+                let body = {
                     let mut guard = req.lock().await;
-                    std::mem::take(&mut guard.body)
+
+                    if let None = guard.body {
+                        vec![]
+                    } else {
+                        let mut body = guard.body.take().unwrap();
+                        std::mem::take(&mut body)
+                    }
                 };
 
                 //tell the frontend that the request body was empty.
-                if body.is_none() {
+                if body.is_empty() {
                     return ErrorResolution::from_error(
                         std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
@@ -135,7 +140,7 @@ async fn route_app() -> App {
                     .resolve();
                 }
 
-                let file_data = Cursor::new(body.take().unwrap());
+                let file_data = Cursor::new(body);
 
                 //send the file data and loaded model and create a streamed output from the image captioner.
                 let result = tokio::task::spawn_blocking(move || {
@@ -152,7 +157,6 @@ async fn route_app() -> App {
 
     //homepage
     app.add_or_change_route("/", Method::GET, None, |_req| async move {
-        sleep(Duration::from_secs(10)).await;
         FileResolution::new("public/index.html").resolve()
     })
     .await
