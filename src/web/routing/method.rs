@@ -7,15 +7,19 @@
 /// This is used majorly when creating route. 
 /// 
 /// Routes may have the same path if and only if the method does not match an existing method for that route.
-#[derive(Debug)]
-#[derive(Eq, Hash, PartialEq)]
-#[derive(Clone)]
+#[derive(Debug, Eq, Hash, PartialEq, Clone)]
 pub enum Method {
+    /// GET, retrieve and serve content
     GET,
+    /// POST, add content
     POST,
+    /// PUT, update/replace content
     PUT, 
+    /// DElETE, remove content
     DELETE,
+    /// PATCH, partial update to content
     PATCH,
+    /// Unknown variant, parsed as other, containing the request.
     Other(String)
 }
 

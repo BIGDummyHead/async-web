@@ -7,21 +7,36 @@ pub mod file_resolution;
 pub mod json_resolution;
 pub mod error_resolution;
 
-/// Represents a resolution for a request
+/// # Resolution
+/// 
+/// A trait that allows you to return a struct to an endpoint from a web app.
+/// 
 pub trait Resolution: Send + 'static {
-    ///
-    /// Get all headers for the HTTP response.
+    /// # Get headers
+    /// 
+    /// Return a collection of headers to serve to the client.
     ///
     fn get_headers(&self) -> Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>>;
 
+    /// # Get Content
+    /// 
+    /// This function should return a stream back to the endpoint that can be iterated to retrieve and serve content to a TCP Stream.
     ///
-    /// Get the content for the resolution. Gets pushed into the headers. Then a length is used.
     fn get_content(&self) -> Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>;
 
 
     /// # resolve
     /// 
-    /// Resolves this Resolution by Boxing it to conform to the return type of a resolution.
+    /// Converts the T type into a Box<dyn Resolution ...
+    /// 
+    /// Please use the following example for basic conversions
+    /// 
+    /// Example:
+    /// ```
+    /// fn resolve(self) -> Box<dyn Resolution> + Send + 'static {
+    ///     Box::new(self)
+    /// }
+    /// ```
     fn resolve(self) -> Box<dyn Resolution + Send + 'static>;
 }
 

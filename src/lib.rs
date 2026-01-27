@@ -11,7 +11,7 @@ mod tests {
     use crate::{
         middleware, resolve,
         web::{
-            App, EndPoint, Method, Middleware, Resolution,
+            App, EndPoint, Method, Middleware, Resolution, middleware,
             resolution::empty_resolution::EmptyResolution, routing::router::route_tree::RouteTree,
         },
     };
@@ -95,7 +95,14 @@ mod tests {
             .await
             .expect("app did not bind");
 
-        let m_ware = middleware!(_req, moves[], {
+        let m_ware = middleware(|req| async move {
+            let ip = {
+                let r_guard = req.lock().await;
+
+                r_guard.client_socket.ip().to_string()
+            };
+
+            println!("Incoming request from IP address: {ip}");
 
             Middleware::Next
         });

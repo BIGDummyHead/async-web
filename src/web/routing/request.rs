@@ -7,13 +7,21 @@ use tokio::{
 
 use crate::web::{Method, Route};
 
-/// Represents a web request.
+/// # Request
+/// 
+/// Represents a singular request that has been made by a TcpStream.
+/// 
+/// Data includes the method, the route, headers, variables, and the body of the request.
 pub struct Request {
     /// The method used for this request.
     pub method: Method,
+
     /// The route of the request
     pub route: Route,
-    /// Any other header.
+
+    /// # headers
+    /// 
+    /// The headers that are included in the request, such as the content length, and other misc header items
     pub headers: HashMap<String, String>,
 
     /// Variable path items.
@@ -27,35 +35,44 @@ pub struct Request {
     /// You may now retrieve from the table "userId" and get the value "1"
     pub variables: HashMap<String, String>,
 
-    /// Body of the request.
-    pub body: Vec<u8>,
+    /// The body of the request.
+    /// 
+    /// None if there was no body included in the request.
+    pub body: Option<Vec<u8>>,
 
     /// The connected socket of the client
     pub client_socket: SocketAddr,
 }
 
 impl Request {
-    /// Parse a tcp stream request and gives back the Request
-    pub async fn parse_request(
+    /// # from_stream
+    /// 
+    /// Takes a mutable reference to the TcpStream (client), reading each line of the stream.
+    /// 
+    /// Each line is individually parsed to create a Request.
+    /// 
+    /// The client's socket is stored in the Request.
+    pub async fn from_stream(
         stream: &mut TcpStream,
         client_socket: SocketAddr,
     ) -> Result<Self, std::io::Error> {
         //create a buffer that will read each line
         let mut reader = BufReader::new(stream);
 
-        let mut first_line = String::new();
+        let mut request_line = String::new();
 
         //the first line should be parsed independently
-        reader.read_line(&mut first_line).await?;
+        reader.read_line(&mut request_line).await?;
 
-        if first_line.is_empty() {
+        if request_line.is_empty() {
+            //no data
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "parse request failed due to no data being provided",
             ));
         }
 
-        let mut request_header = first_line.split(" ");
+        let mut request_header = request_line.split(" ");
 
         let method = request_header
             .next()
@@ -114,11 +131,17 @@ impl Request {
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(0);
 
-        let mut body = vec![0u8; content_length];
-
-        if content_length > 0 {
+        let body = if content_length > 0 {
+            
+            //read the body from the content length.
+            let mut body = vec![0u8; content_length];
             reader.read_exact(&mut body).await?;
-        }
+            Some(body)
+
+        } else {
+            //no body was provided.
+            None
+        };
 
         Ok(Self {
             method,

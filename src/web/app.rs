@@ -34,16 +34,25 @@ use crate::web::{
 /// // Check if app was created successfully
 /// ```
 pub struct App {
-    pub work_manager: Arc<WorkManager<()>>,
-    pub listener: Option<TcpListener>,
-    pub router: Arc<Mutex<RouteTree>>,
+    /// The listener used for binding.
+    listener: Option<TcpListener>,
+
+    /// The router that controls all routes in the App
+    router: Arc<Mutex<RouteTree>>,
     //middleware that is applied to all routes called
     global_middleware: Arc<Mutex<Vec<MiddlewareClosure>>>,
-    //handled to the spawned task
+
+    //handle to the spawned task
     app_task: Option<JoinHandle<()>>,
-    //callback to handle errors that in inbound from
+
+    // callback to handle errors
     error_callback: Option<Arc<Pin<Box<dyn Fn(String) -> () + Send + Sync + 'static>>>>,
+
+    /// Broadcast channel sender to kill the app task
     shutdown: Option<broadcast::Sender<()>>,
+
+    /// reference to the work manager to control workers.
+    work_manager: Arc<WorkManager<()>>,
 }
 
 /// Represents a web application where you can bind, route, and do other web server related activities.
@@ -79,15 +88,11 @@ impl App {
         A: ToSocketAddrs,
     {
         //bind our tcp listener to handle request.
-        let bind_result = TcpListener::bind(addr).await;
-
-        if let Err(e) = bind_result {
-            return Err(e);
-        }
+        let bind_result = TcpListener::bind(addr).await?;
 
         let work_manager = Arc::new(WorkManager::new(worker_count).await);
 
-        let listener = Some(bind_result.unwrap());
+        let listener = Some(bind_result);
         let router = Arc::new(Mutex::new(RouteTree::new(None)));
 
         let bind = Self {
@@ -121,115 +126,6 @@ impl App {
 
             while let Some(_) = rx.recv().await {}
         })
-    }
-
-    /// Reads from an incoming TCP stream and parses it into a `Request`.
-    ///
-    /// Handles request decoding and validation.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the stream cannot be read or the request is malformed.
-
-    async fn process_acception(
-        mut stream: &mut TcpStream,
-        connected_socket: SocketAddr,
-    ) -> Result<Request, std::io::Error> {
-        let request_result = Request::parse_request(&mut stream, connected_socket).await;
-
-        if let Err(e) = request_result {
-            return Err(e);
-        }
-
-        let request = request_result.unwrap();
-
-        Ok(request)
-    }
-
-    /// Extracts dynamic route parameters from the matched route tree.
-    ///
-    /// Traverses parent route nodes and assigns variable values into the request.
-    /// This is executed after routing but before middleware and resolution execution.
-
-    async fn set_request_variables(req_ref: Arc<Mutex<Request>>, route_ref: RouteNodeRef) -> () {
-        //the given route by the user, cleaned.
-        let given_route: String = {
-            let req_lock = req_ref.lock().await;
-
-            req_lock.route.cleaned_route.clone()
-        };
-
-        let mut given_route_parts: Vec<&str> = given_route.split('/').collect();
-
-        let mut current_ref = Some(route_ref.clone());
-
-        let wild_card_skip = {
-            let mut current = Some(route_ref.clone());
-            let mut wild_skip = 0;
-
-            while let Some(node) = current {
-                let guard = node.lock().await;
-                current = guard.parent.clone();
-                wild_skip += 1;
-            }
-
-            //skip for the WILDCARD {*} and SKIP for the beginning "/" route.
-            wild_skip - 1
-        };
-
-        while let Some(c_ref) = current_ref {
-            //pop a route part
-            let route_part = given_route_parts.pop();
-
-            //if none, something is wrong, break out
-            if route_part.is_none() {
-                break;
-            }
-
-            //unwrap the route part
-            let route_part = route_part.unwrap();
-
-            //check if the route part is empty, we are allowed to continue from this
-            if route_part.is_empty() {
-                //since we own c_ref and have not locked, we can just reuse.
-                //we need to pass into some for ownership
-                current_ref = Some(c_ref);
-                continue;
-            }
-
-            //lock for checks
-            let c_ref_lock = c_ref.lock().await;
-
-            if c_ref_lock.is_var {
-                //clean the ID from {name} -> name
-                let mut id = c_ref_lock.id.clone();
-                id.remove(0);
-                id.remove(id.len() - 1);
-
-                let is_wild = id.eq("*");
-
-                let value = if is_wild {
-                    given_route_parts.push(route_part);
-
-                    given_route_parts
-                        .iter()
-                        .skip(wild_card_skip)
-                        .copied()
-                        .collect::<Vec<&str>>()
-                        .join("/")
-                } else {
-                    route_part.to_string()
-                };
-
-                req_ref.lock().await.variables.insert(id, value);
-
-                if is_wild {
-                    break;
-                }
-            }
-
-            current_ref = c_ref_lock.parent.clone();
-        }
     }
 
     /// # Start
@@ -287,10 +183,15 @@ impl App {
                         let router_ref = router.clone();
                         let middleware_ref = global_middleware.clone();
 
+                        let error_callback = error_callback.clone();
                         work_manager
                             .add_work(Box::pin(async move {
-                                Self::request_work(accepted_client.unwrap(), middleware_ref, router_ref)
+                                let completed_work = handle_client_request(accepted_client.unwrap(), middleware_ref, router_ref)
                                     .await;
+
+                                if let Err(e) = completed_work {
+                                    error_callback(e.to_string());
+                                }
                             }))
                             .await;
                     }
@@ -331,170 +232,6 @@ impl App {
         Ok(AppState::Closed)
     }
 
-    /// Executes all logic required to handle a single client request.
-    ///
-    /// This includes:
-    /// - Parsing the request
-    /// - Resolving the route and method
-    /// - Applying middleware
-    /// - Executing the endpoint resolution
-    /// - Writing the response to the TCP stream
-    ///
-    /// Errors during processing terminate handling for the request.
-
-    async fn request_work(
-        client: (TcpStream, SocketAddr),
-        global_middleware: Arc<Mutex<Vec<MiddlewareClosure>>>,
-        router_ref: Arc<Mutex<RouteTree>>,
-    ) -> () {
-        let mut stream = client.0;
-        let client_socket = client.1;
-
-        //process the acception and get the result from the stream
-        let req_result = Self::process_acception(&mut stream, client_socket).await;
-
-        if let Err(e) = req_result {
-            eprintln!("Error in processing request: {}", e);
-            return;
-        }
-
-        //the web request
-        let web_request = req_result.unwrap();
-
-        let request = Arc::new(Mutex::new(web_request));
-
-        //get the function to handle the resolution, backs up to a 404 if existant
-        let (cleaned_route, method) = {
-            let request_lock = request.lock().await;
-            (
-                request_lock.route.cleaned_route.clone(),
-                request_lock.method.clone(),
-            )
-        };
-
-        let endpoint_opt = {
-            let binding = router_ref.lock().await;
-
-            let route = binding.get_route(&cleaned_route).await;
-
-            match route {
-                Some(r) => {
-                    // This no longer deadlocks because the lock was dropped above
-                    Self::set_request_variables(request.clone(), r.clone()).await;
-                    let route_lock = r.lock().await;
-                    route_lock.brw_resolution(&method).clone()
-                }
-                None => binding
-                    .missing_route
-                    .as_ref()
-                    .and_then(|mr| mr.brw_resolution(&Method::GET))
-                    .clone(),
-            }
-        };
-
-        if endpoint_opt.as_ref().is_none() {
-            return;
-        }
-
-        let endpoint = endpoint_opt.unwrap();
-
-        // middleware_failed_resolution, gives back an Option<Middleware> with some if it failed
-        let middleware_failed_resolution = {
-            let mut final_middleware = None;
-
-            let global_middleware_lock = global_middleware.lock().await;
-
-            let mut all_middleware = Vec::new();
-            all_middleware.extend_from_slice(&global_middleware_lock);
-
-            // ! Drop reference once we have all the function refs.
-            drop(global_middleware_lock);
-
-            if let Some(route_middleware) = &endpoint.middleware {
-                all_middleware.extend_from_slice(&route_middleware);
-            }
-
-            for middle_ware_closure in all_middleware {
-                match middle_ware_closure(request.clone()).await {
-                    Middleware::Invalid(res) => {
-                        final_middleware = Some(res);
-                        break;
-                    }
-                    Middleware::InvalidEmpty(status_code) => {
-                        final_middleware = Some(EmptyResolution::status(status_code).resolve());
-                        break;
-                    }
-                    Middleware::Next => continue,
-                };
-            }
-
-            final_middleware
-        };
-
-        let write_resolution = if let Some(failed_middleware) = middleware_failed_resolution {
-            Some(failed_middleware)
-        } else {
-            
-            Some((endpoint.resolution)(request.clone()).await)
-        };
-
-        if write_resolution.as_ref().is_none() {
-            return;
-        }
-
-        let resolved = Self::resolve(write_resolution.unwrap(), &mut stream).await;
-
-        if let Err(e_r) = resolved {
-            println!("Failed to resolve request: {e_r}");
-        }
-    }
-
-    /// Finalizes a `Resolution` into a complete HTTP response.
-    ///
-    /// Writes headers, content length, and body to the provided TCP stream.
-    ///
-    /// # Errors
-    ///
-    /// I/O errors encountered during writing are logged but not returned.
-
-    async fn resolve(
-        resolved: Box<dyn Resolution + Send>,
-        stream: &mut TcpStream,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        //write the headers to the stream
-        let mut headers = resolved.get_headers().await.join("\r\n");
-        headers.push_str("\r\nTransfer-Encoding: chunked\r\n\r\n");
-        stream.write_all(headers.as_bytes()).await?;
-
-        let mut content = resolved.get_content();
-
-        //retrieve the next chunk of the body
-        while let Some(chunk) = content.next().await {
-            let size = chunk.len();
-
-            if size <= 0 {
-                continue; //nothing to write 
-            }
-
-            //size header.
-            let size_header = format!("{size:X}\r\n");
-            stream.write_all(size_header.as_bytes()).await?;
-
-            //content
-            stream.write_all(&chunk).await?;
-
-            //terminator
-            stream.write_all(b"\r\n").await?;
-        }
-
-        //indicate end of stream
-        stream.write_all(b"0\r\n\r\n").await?;
-
-        Ok(())
-    }
-}
-
-impl App {
     /// Adds a new route or replaces an existing route’s resolution for the given method.
     ///
     /// If the route already exists, its resolution for the specified method is overwritten.
@@ -514,10 +251,8 @@ impl App {
         F: Fn(Arc<Mutex<Request>>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Box<dyn Resolution + Send + 'static>> + Send + 'static,
     {
-        let resolution: ResolutionFnRef = Arc::new(move |req: Arc<Mutex<Request>>| {
-            Box::pin(resolution(req))
-                as Pin<Box<dyn Future<Output = Box<dyn Resolution + Send + 'static>> + Send>>
-        });
+        let resolution: ResolutionFnRef =
+            Arc::new(move |req: Arc<Mutex<Request>>| Box::pin(resolution(req)));
 
         let endpoint = EndPoint::new(resolution, middleware);
 
@@ -551,10 +286,8 @@ impl App {
             }
         }
 
-        let resolution: ResolutionFnRef = Arc::new(move |req: Arc<Mutex<Request>>| {
-            Box::pin(resolution(req))
-                as Pin<Box<dyn Future<Output = Box<dyn Resolution + Send + 'static>> + Send>>
-        });
+        let resolution: ResolutionFnRef =
+            Arc::new(move |req: Arc<Mutex<Request>>| Box::pin(resolution(req)));
 
         let endpoint = EndPoint::new(resolution, middleware);
         let route_res = Some((method, endpoint));
@@ -619,4 +352,240 @@ impl App {
             _ => AppState::Running,
         }
     }
+}
+
+/// Extracts dynamic route parameters from the matched route tree.
+///
+/// Traverses parent route nodes and assigns variable values into the request.
+/// This is executed after routing but before middleware and resolution execution.
+
+async fn set_request_variables(req_ref: Arc<Mutex<Request>>, route_ref: RouteNodeRef) -> () {
+    //the given route by the user, cleaned.
+    let given_route: String = {
+        let req_lock = req_ref.lock().await;
+
+        req_lock.route.cleaned_route.clone()
+    };
+
+    let mut given_route_parts: Vec<&str> = given_route.split('/').collect();
+
+    let mut current_ref = Some(route_ref.clone());
+
+    let wild_card_skip = {
+        let mut current = Some(route_ref.clone());
+        let mut wild_skip = 0;
+
+        while let Some(node) = current {
+            let guard = node.lock().await;
+            current = guard.parent.clone();
+            wild_skip += 1;
+        }
+
+        //skip for the WILDCARD {*} and SKIP for the beginning "/" route.
+        wild_skip - 1
+    };
+
+    while let Some(c_ref) = current_ref {
+        //pop a route part
+        let route_part = given_route_parts.pop();
+
+        //if none, something is wrong, break out
+        if route_part.is_none() {
+            break;
+        }
+
+        //unwrap the route part
+        let route_part = route_part.unwrap();
+
+        //check if the route part is empty, we are allowed to continue from this
+        if route_part.is_empty() {
+            //since we own c_ref and have not locked, we can just reuse.
+            //we need to pass into some for ownership
+            current_ref = Some(c_ref);
+            continue;
+        }
+
+        //lock for checks
+        let c_ref_lock = c_ref.lock().await;
+
+        if c_ref_lock.is_var {
+            //clean the ID from {name} -> name
+            let mut id = c_ref_lock.id.clone();
+            id.remove(0);
+            id.remove(id.len() - 1);
+
+            let is_wild = id.eq("*");
+
+            let value = if is_wild {
+                given_route_parts.push(route_part);
+
+                given_route_parts
+                    .iter()
+                    .skip(wild_card_skip)
+                    .copied()
+                    .collect::<Vec<&str>>()
+                    .join("/")
+            } else {
+                route_part.to_string()
+            };
+
+            req_ref.lock().await.variables.insert(id, value);
+
+            if is_wild {
+                break;
+            }
+        }
+
+        current_ref = c_ref_lock.parent.clone();
+    }
+}
+
+/// # Handle Client Request
+///
+/// This function is called whenever a client is accepted from the tcp listener.
+///
+/// Each time a client is accepted, the request is parsed, a route is found, middleware is called, and a endpoint is resolved.
+
+async fn handle_client_request(
+    client: (TcpStream, SocketAddr),
+    global_middleware: Arc<Mutex<Vec<MiddlewareClosure>>>,
+    router_ref: Arc<Mutex<RouteTree>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (mut stream, client_socket) = client;
+
+    //process the acception and get the result from the stream
+    let request = Arc::new(Mutex::new(
+        Request::from_stream(&mut stream, client_socket).await?,
+    ));
+
+    //get the function to handle the resolution, backs up to a 404 if existant
+    let (cleaned_route, method) = {
+        let request_lock = request.lock().await;
+        (
+            request_lock.route.cleaned_route.clone(),
+            request_lock.method.clone(),
+        )
+    };
+
+    let endpoint = {
+        let binding = router_ref.lock().await;
+
+        let route = binding.get_route(&cleaned_route).await;
+
+        match route {
+            Some(r) => {
+                // This no longer deadlocks because the lock was dropped above
+                set_request_variables(request.clone(), r.clone()).await;
+                let route_lock = r.lock().await;
+                route_lock.brw_resolution(&method)
+            }
+            None => binding
+                .missing_route
+                .as_ref()
+                .and_then(|mr| mr.brw_resolution(&Method::GET)),
+        }
+        .and_then(|end_point_ref| Some(end_point_ref.clone()))
+    }
+    .ok_or(RoutingError::NoRouteExist)?;
+
+    //find any middleware function that when called, returns an Invalid or InvalidEmpty
+    let middleware_failed_resolution = {
+        //the given back final middleware.
+        let mut invalid_middleware = None;
+
+        let global_mw_guard = global_middleware.lock().await;
+
+        //size of all middleware included
+        let mware_col_size =
+            global_mw_guard.len() + endpoint.middleware.as_ref().map(|mw| mw.len()).unwrap_or(0);
+
+        let mut test_middleware = Vec::with_capacity(mware_col_size);
+
+        test_middleware.extend_from_slice(&global_mw_guard);
+
+        // ! Drop reference once we have all the function refs.
+        drop(global_mw_guard);
+
+        if let Some(route_middleware) = &endpoint.middleware {
+            test_middleware.extend_from_slice(route_middleware);
+        }
+
+        for middleware_closure in test_middleware {
+            //call each middleware and map it out
+            match middleware_closure(request.clone()).await {
+                Middleware::Invalid(res) => {
+                    invalid_middleware = Some(res);
+                    break;
+                }
+                Middleware::InvalidEmpty(status_code) => {
+                    invalid_middleware = Some(EmptyResolution::status(status_code).resolve());
+                    break;
+                }
+                Middleware::Next => continue,
+            };
+        }
+
+        invalid_middleware
+    };
+
+    //get either the failed middleware, or the endpoint resolution
+    let resolved =
+        middleware_failed_resolution.unwrap_or((endpoint.resolution)(request.clone()).await);
+
+    resolve(resolved, &mut stream).await?;
+
+    Ok(())
+}
+
+/// # Resolve
+///
+/// Takes a boxed resolution and TcpStream(client)
+///
+/// The function does the following:
+///
+/// i. push the transfer encoding header
+/// ii. write all headers required to the stream
+/// iii. retrieves the content stream
+/// iv. loops over the content stream chunk by chunk, writing to the client
+/// v. writes the
+
+async fn resolve(
+    resolved: Box<dyn Resolution + Send>,
+    stream: &mut TcpStream,
+) -> Result<(), Box<dyn std::error::Error>> {
+    //write the headers to the stream
+    let mut headers = resolved.get_headers().await.join("\r\n");
+    headers.push_str("\r\nTransfer-Encoding: chunked\r\n\r\n");
+    stream.write_all(headers.as_bytes()).await?;
+
+    let mut content_stream = resolved.get_content();
+
+    //retrieve the next chunk of the body
+    while let Some(chunk) = content_stream.next().await {
+        let size = chunk.len();
+
+        if size <= 0 {
+            continue; //nothing to write 
+        }
+
+        //create the size header for the stream chunk
+        let size_header = format!("{size:X}\r\n");
+        let size_header = size_header.as_bytes();
+
+        //create a buffer that will hold this chunk data
+        let mut buffer = Vec::with_capacity(size_header.len() + chunk.len() + 2);
+
+        //the buffer is comprised of the size header, the data chunk, the terminator for the chunk.
+        buffer.extend_from_slice(size_header);
+        buffer.extend_from_slice(&chunk);
+        buffer.extend_from_slice(b"\r\n");
+
+        //write ONCE
+        stream.write_all(&buffer).await?;
+    }
+
+    //indicate end of stream
+    stream.write_all(b"0\r\n\r\n").await?;
+
+    Ok(())
 }
