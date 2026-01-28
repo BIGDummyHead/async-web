@@ -1,12 +1,12 @@
 use futures::Stream;
 use std::pin::Pin;
-use async_stream::stream;
 
 pub mod empty_resolution;
 pub mod file_resolution;
 pub mod json_resolution;
 pub mod error_resolution;
 pub mod redirect;
+pub mod merged_resolution;
 
 /// # Resolution
 /// 
@@ -163,15 +163,4 @@ pub fn get_status_header(status_code: i32) -> String {
 /// ```
 pub fn empty_content() -> Vec<u8> {
     Vec::new()
-}
-
-/// # Stream Empty Content
-/// 
-/// This function is equal to providing empty content or an empty Vec<u8> to the user.
-/// 
-/// The difference is that it Pins, boxes, streams, and yields the empty vector providing a shorter format.
-pub async fn stream_empty_content() ->  Pin<Box<dyn Stream<Item = Vec<u8>> + Send + 'static>> {
-    Box::pin(stream!{
-        yield empty_content()
-    })
 }
