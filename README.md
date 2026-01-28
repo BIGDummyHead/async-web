@@ -1,565 +1,268 @@
 # async-web
 
-Minimal asynchronous web server framework in Rust built on Tokio. It exposes a small router, middleware pipeline, and a worker-driven executor that schedules per-connection tasks.
+A minimal, Express.js like RUST web server library. Allowing for you to create a server, route it, server custom request, and do much more.
 
-# Getting Started
+Allows for ultimate control over your application with minimal overhead.
 
-To get started all we need is a valid Socket and the tokio package, which can be installed via:
+Offers:
 
-```
-cargo add tokio --features full
-```
+* A Routing Tree
+* Routing Methods
+* Custom Resolutions
+* Custom Middleware
+* Async workers to handle multiple heavy request at once
+* Auto worker scaling to ensure work is never blocked
 
-To give you the main function attribute for async as will be used in the following examples.
+## Creating a Server
 
-`You should assume all examples given are in an async function that return Result<(), Box<dyn std::error::Error>>`
-
-## Binding an App
-
-This is the most crucial of any step. When binding your server you are creating workers, router trees, middleware, and various other items to enhance the flow of the application.
-
-```rust
-
-    //thread pool count, this is the amount of workers you want processing work.
-    let worker_count = 100;
-
-    // you may also use IPAddr4 or anything that implements ToSocketAddr
-    let addr = "127.0.0.1:8080";
-
-    //we will bind the app with a worker count and socket    
-    let app = App::bind(worker_count, addr).await?;
-
-```
-
-## Routing your App
-
-Once an application has been bound, we are allowed to create routes, this may seem familiar if you have used something like express before where we add routes, methods, middleware, and some kind of resolution.
-
-`You may also use routing variables but we will explore this in later examples.`
-
-There are three different functions you may use to add a route, one of these functions can be used to change the route however.
-
-For example, let's add three different routes, using the three different functions and explore their outcomes.
-
-` Note: Two routes intersect when their route path "/path" and method match Method::GET. It is important to note that multiple of the same path may exist with different Methods     ` 
+You must first bind the app to the socket you want to use.
 
 ```rust
 
-    // --snip--
-    // assume we have bound an app.
-
-    let no_middleware = None;
-
-    //here we make a call to add_or_change_route, this is pretty explicit with what it will do, note that it returns an error for YOU to handle incase anything is wrong with the provided route
-    //you however, do not receive an error if the route exist, as it does not care and will override it.
-    let changed: Result<(), async_web::web::errors::RoutingError> = app
-        .add_or_change_route(
-            "/home", //change the home page
-            Method::GET, //method, GET, POST, PUT, DELETE, etc... with exception to enum item Other(String)
-            no_middleware, // None
-            |req| async move {
-                //tell the server to serve a 200 message.
-                EmptyResolution::status(200).resolve()
-            }
-        )
-        .await;
-
-    //here we try to add this route, the RoutingError is again handed back to YOU. This time however, a new error may be present in the chance that the route already exist!
-    //in this case we would have a route conflict because '/home' with the method GET already exist.
-    let changed: Result<(), async_web::web::errors::RoutingError> = app
-        .add_route(
-            "/home",
-            Method::GET,
-            None,
-            |req| async move {
-                //tell the server to serve a 200 message.
-                EmptyResolution::status(200).resolve()
-            },
-        )
-        .await;
-
-    //finally, my preferred choice, add_or_panic.
-    //in this scenario we panic if the route has an error or it already exist. In my opinion this is the best way to add routes IF you are adding routes on startup only. 
-    app
-        .add_or_panic(
-            "/home",
-            Method::POST, //note that we are using a different method
-            None,
-            |req| async move {
-                //tell the server to serve a 200 message.
-                EmptyResolution::status(200).resolve()
-            },
-        )
-        .await;
+async fn() -> Result<(), AppState> {
+    //bind the application to the socket.
+    //i would recommend the IpAddr crate https://doc.rust-lang.org/std/net/enum.IpAddr.html
+    let mut app = App::bind("127.0.0.1:80").await?;
+    --snip--
 ```
 
-## Middleware
-
-You may have noticed that in the previous examples we passed `no_middleware` to each route or `Option::None` (as stated)
-
-But what if we want to have middleware, and what exactly is it?
-
-Middleware is a way to reuse functions in between routing to your app route.
-
-This library uses it in this fasion:
-
-`User Request Route -> Route Exist -> Invoke Global Middlewares -> Invoke Route Specific Middleware -> Invoke Resolution`
-
-It is to be noted that if the middleware (as will see soon) stops at any point the `Resolution` is never reached.
-
-### Global 
+Now that you have an app, you can add routes to it, with methods, middleware, and resolutions!
 
 ```rust
+    --snip--
+    
+    let middle_ware = None;
+    app.add_or_change_route("/", Method::GET, middle_ware, |req| async move {
+        //serve a resolution:
+        FileResolution::new("public/index.html").resolve() //-> returns a boxed dyn Resolution
+    }).await.expect("could not change home page"); //this error is thrown if the home page was already routed @ get.
 
-    //here we can create a singular middleware function that will be used to check if the requester is logged in. Of course it is just a snippet.
-    let check_logged_in = middleware!(req, {
-        //--snip do code to make sure logged in--
-        // if so move next
-        Middleware::Next 
+    app.add_or_panic("/{folder}/{*}", Method::GET, None, |req| async move {
+
+        //get the contents from the route.
+        let (folder, path) = {
+            //drops after folder and path found
+            let guard = req.lock().await;
+
+            (
+                //in this scenario, if we assume that the route was reached, these values must exist.
+                guard.variables.get("folder").map(|f| f.to_string()).unwrap(),
+                guard.variables.get("*").map(|f| f.to_string()).unwrap(),
+            )
+        };
+
+        //create a file resolution and serve it. If this file does not exist 404 is returned.
+        let path = format!("{folder}/{path});
+        FileResolution::new(&path).resolve()
     });
 
-    //this indicates the middleware will be used for every route call
-    app.use_middleware(check_logged_in).await;
-
+    --snip---
 ```
 
-### Singular
+In these two examples we use the `FileResolution` struct, which implements the `Resolution` (where `.resolve()` is implemented) trait.
+
+However, the library has the following Resolutions pre-built for common resolutions:
+
+* EmptyResolution
+* ErrorResolution
+* FileResolution
+* JsonResolution
+
+These resolutions are pretty light weight and dynamic.
+
+### Empty Resolution
+
+Simply returns no content to the user, but provides a status. 
+
+`EmptyResolution::status(stats_code:i32).resolve()`
+
+### Error Resolution
+
+Returns a resolution with the status of 500, this is subject to change however.
+
+These can be created in two ways:
+
+* `ErrorResolution::from_error<T>(error: T, configured: impl Into<Option<Configured>>).resolve()`
+* `ErrorResolution::from_boxed(error: Boxed<std::error::Error>, configured: impl Into<Option<Configured>>).resolve()`
+
+This struct is useful because you can map errors into error resolutions and then serve them.
+
+`Configured` is an enum that has 3 values
+
+* `Configued::PlainText` the error to string is served back
+* `Configured::Json` the error has an error message and status code (500)
+* `Configured::Custom(Box<dyn Fn(&Box<dyn std::error::Error + Send>) -> String + Send>)` which is a function that changes our error into a String and is then served
+
+### File Resolution
+
+Serves a file back to the user with a status code (200 or 404).
+
+This resolution is very dynamic as it will resolve the file type headers, code, and serve the file for you!
+
+`FileResolution::new("path/to_file.html").resolve()`
+
+### Json Resolution
+
+Converts a value into a JSON string.
+
+`JsonResolution::serialize<T>(value: T)` where T : serde_json::Serialize
+
+It is important to note, that this value does not return `Self` instead, it returns `Result<Self, ErrorResolution>` if the serialization failed.
+
+This is good to know because we can return the error resolution (configured to Json) back to the user if it did not serialize properly. 
+
+
+## Creating our own Resolution
+
+Now that we know how a resolution works, we can create our own.
+
+For example if we want to create a resolution that slowly serves a string back to the user.
 
 ```rust
-
-    //check's if the user is an admin
-    let check_is_admin = middleware!(req, {
-        //--snip checks if admin, if admin move next--
-        Middleware::Next
-    });
-
-    //checks if the admin has access to the resource
-    let has_access = middleware!(req, {
-        //--snip-- user was denied access for xyz
-        //note how we can return a resolution here, we will go into resolutions later on...
-        //you may also use Middleware::InvalidEmpty(403) to indicate the same effect.
-        Middleware::Invalid(EmptyResolution::new(403))
-    });
-
-    app.add_or_panic(
-        "/admin/home",
-        Method::POST, //note that we are using a different method
-        middleware!(check_is_admin, has_access), //note how we can reuse the middleware! macro to conjoin our middleware.
-        |req| async move {
-                //tell the server to serve a 200 message.
-                EmptyResolution::status(200).resolve()
-            },
-    )
-    .await;
-
-```
-
-
-## Starting our App
-
-Now that you understand how to bind the app, add middleware, and route the app. We can look into how to start this thing!
-
-You probably also have questions about other things like:
-
-* Moving values between `resolve!` and `middleware!`
-* What else can routes return?
-* How does one use variables in their route?
-* How can I create a custom Resulition?
-
-These will all be covered, but for now let's focus on starting this app.
-
-```rust
-
-let worker_count = 100;
-let app = App::bind(worker_count, "127.0.0.1:80").await?; //ensure that the app is bound
-
-//add routes
-
-// if the app starts successfully, the Ok(AppState::Running) is returned,
-// if the app was already running, the Err(AppState::Running) is returned
-let start_res: Result<AppState, AppState> = app.start();
-
-//keep your program alive.
-loop {
-    println!("Enter 'quit' to stop.");
-
-    let mut input = String::new();
-
-    // Read the line from stdin
-    io::stdin()
-        .read_line(&mut input) 
-        .expect("Failed to read line"); 
-
-    if input == "quit" {
-        break;
-    }
-}
-
-//again, this returns just like start
-// we await this future because it sends a signal to close the listener, then joins the app thread until a graceful closure.
-let close_res: Result<AppState, AppState> = app.close().await;
-
-// you must now create a new application.
-
-```
-
-## Moving Values 
-
-Sometimes we need to move and clones values from one scope to another. However you cannot do this without using the `moves` variable in the `middleware!` and `resolve!` macro.
-
-If we are add a route using the app, however we need to change how the structure of the closure is set up.
-
-```rust
-
-//this example of moves would work for both middleware!/resolve!
-
-let moved_value = Arc::new(String::from("Test"));
-let other_moved_value = Arc::new(String::from("Test"));
-
-app.add_or_panic(
-    "/admin/home",
-    Method::POST, //note that we are using a different method
-    None,
-    move |req| {
-        let moved_value = moved_value.clone();
-        let 
-        async move {
-            //tell the server to serve a 200 message.
-            EmptyResolution::status(200).resolve()
-        }
-    }
-    ).await;
-
-```
-
-## Resolving a Route
-
-You may have noticed that all the examples use the `EmptyResolution::status(200).resolve()` value. Meaning to tell the request 200 (ok) with no content.
-
-However, we use other pre-made resolutions in the library such as, each of these have the `resolve()` function:
-
-* FileResolution::new(&str) ->  creates a stream to the given file that returns the content of the file
-* EmptyResolution::status(i32) -> creates an empty result with a header of the status code
-* ErrorResolution -> see `from_error`, `from_boxed_error`, `from_error_with_config`, `from_boxed_error_with_config`. Essentially, this resolution transforms an `std::error::Error` into a resolution.
-* JsonResolution::serialize<T>(T) -> Result<Self, ErrorResolution>. If the serialization fails, you are passed an error resolution automatically mapped. If it does not you may call `serialized.unwrap().resolve()`
-
-Each of these pre-included resolutions implement the `Resolution` trait. This trait includes 3 functions to implement:
-
-* `fn get_headers(&self) -> Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>>`
-* `fn get_content(&self) ->  Pin<Box<dyn Stream<Item = Vec<u8>> + Send + 'static>>`
-* `fn resolve(self) -> Box<dyn Resolution + Send + 'static>`
-
-### Creating a Resolution
-
-Creating a resolution is rather simple. Below is a "StreamedResolution" example. 
-
-Below you will find an example in which we take a receiver, receive data from it, and yield it to the resolution.
-
-
-```rust
-
-// Using tokio (with features 'full') and tokio_stream
-use std::sync::Arc;
 
 use async_stream::stream;
 use async_web::web::{Resolution, resolution::get_status_header};
-use tokio::sync::{Mutex, broadcast::Receiver};
 
-// Struct that includes an Async Safe Mutatable Receiver (tokio::sync::broadcast) of compressed framed data
-pub struct StreamedResolution {
-    rx:  Arc<Mutex<Receiver<Vec<u8>>>>,
+pub struct SlowString {
+    serve: String
 }
 
-impl StreamedResolution {
-    /// Pass the receiver subscription into the StreamResolution structure.
-    /// Returns the instance of the resolution trait boxed.
-    pub fn new(rx: Receiver<Vec<u8>>) -> Box<dyn Resolution + Send> {
-        let res = Self { rx: Arc::new(Mutex::new(rx)) };
-        Box::new(res)
+impl SlowString {
+    pub fn new(serve: &str) -> Self {
+        Self { serve: serve.to_string() }
+    }
+
+    pub fn serve(serve: &str) -> Box<dyn Resolution + Send + 'static> {
+        Self::new(serve).resolve()
     }
 }
 
-/// Resolution implementation for StreamedResolution
-impl Resolution for StreamedResolution {
-
-    // Get Headers
-    // Headers to send to the requester. This fortunately will always be 200.
+impl Resolution for SlowString {
+    // return any headers that are required to give back the content. For this we just serve a 200 since it will always be okay
     fn get_headers(&self) -> std::pin::Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>> {
-        //Box and pin the function that returns the single status header string.
-        Box::pin(async move { vec![get_status_header(200)] })
+        Box::pin(async move {
+            vec![get_status_header(200)]
+        })        
     }
 
-    //resolve the function
-    fn resolve(self) -> Box<dyn Resolution + Send + 'static> {
-        Box::new(self)
-    }
-
-    /// Get Content
-    /// Content function that will be invoked to get the streamed data.
+    //slowly stream the content back to the user.
     fn get_content(&self) -> std::pin::Pin<Box<dyn futures::Stream<Item = Vec<u8>> + Send>> {
-
-        //create a clone of the receiver 
-        let rx = self.rx.clone();
-
-        // stream! macro from tokio_stream
-        let content_stream = stream! {
-    
-            //loop to yield compressed data from the receiver.
-            loop {
-
-                //lock the receiver guard, recv the data and drop 
-                let data = {
-                    let mut guard = rx.lock().await;
-                    guard.recv().await
-                };
-
-                //possible error from compression, okay to continue
-                if data.is_err() {
-                    continue;
-                }
-
-                let data = data.unwrap();
-
-                //yield our unpacked data.
-                yield data;
-
-            }
-        };
-
-        //pin our stream.
-        Box::pin(content_stream)
-    }
-}
-
-```
-
-#### Using our new Resolution
-
-```rust
-
-    //clone our broadcaster
-    let compressed_frame_rx_clone = compressed_frame_rx.clone();
-
-    //streamed POST for the content of the device
-    app.add_or_panic(
-        "/stream", //path
-        Method::POST,
-        None,
-        move |req| {
-            let compressed_frame_rx_clone = compressed_frame_rx_clone.clone();
-            async move {
-                //create a receiver we can pass to the streamed resolution
-                let rx = compressed_frame_rx_clone.subscribe();
-
-                //return our new resolution
-                StreamedResolution::new(rx).resolve()
-            }
-        }),
-    )
-    .await;
-```
-
-Our frontend code (JavaScript) may look like this:
-
-```js
-
-async function readStream() {
-
-    //fetch our stream
-    const response = await fetch("/stream", { method: "POST" });
-
-    //get the body reader
-    const reader = response.body.getReader();
-
-    //keep reading until done
-    while (true) {
         
-        const { value, done } = await reader.read();
+        //clone this, so it is not moved.
+        let serve = self.serve.clone();
 
-        if (done)
-            break;
-
-        --snip--
-    }
-}
-```
-
-A great example, can be found in the examples folder under [image analyzer](https://github.com/BIGDummyHead/async-web/tree/master/examples/image-analyzer/src)
-
-This example uses each and every part of the App, from basic file serving, implementing middleware, and implementing a custom token output resolution.
-
-This example has the capability to take in a image from the body of the request and return a stream of characters that caption the image.
-
-Let's take a look.
-
-## Limiting API Calls (Middleware)
-
-```rust
-
-let limit_api_calls = middleware!(req, moves[api_calls_clone], {
-        let ip_addr: String = {
-            let guard: MutexGuard<'_, Request> = req.lock().await;
-
-            match guard.client_socket {
-                std::net::SocketAddr::V4(addr) => addr.ip().to_string(),
-                std::net::SocketAddr::V6(addr) => addr.ip().to_string(),
-            }
-        };
-
-        // ! remember to drop the lock.
-        let mut api_guard = api_calls_clone.lock().await;
-
-        //insert a new handler to the map
-        if !api_guard.contains_key(&ip_addr) {
-            //2 calls per minute. 120 calls per hour.
-            let max_calls = 2;
-            let time_frame = std::time::Duration::from_mins(1);
-            api_guard.insert(ip_addr.clone(), ApiHandler::new(max_calls, time_frame));
-        }
-
-        //get the api call, this should be expected to always have the IP address.
-        let api_handle: Result<Middleware, Middleware> =  
-        api_guard
-        .get_mut(&ip_addr)
-        .unwrap()
-        .make_call() 
-        .map_err(|e| {
-            Middleware::Invalid(ErrorResolution::from_error(e, Configured::Json).resolve())
-        })
-        .map(|_| Middleware::Next);
-
-        //drop the api calls lock
-        drop(api_guard);
-
-        api_handle.unwrap_or_else(|m| m)
-    });
-```
-
-The [API Handler](https://github.com/BIGDummyHead/async-web/blob/master/examples/image-analyzer/src/api_call.rs) is a struct that allows us to limit how many times the API can be called within a timeframe.
-
-`Note: This struct is not apart of the library`
-
-You will see that the Middleware will only continue if the user has made less than 2 calls withing the last minute.
-
-We will then use this API limiter for heavier calls for example
-
-## Caption Image Route (POST Example with middleware)
-
-```rust
-
-app.add_or_panic(
-        "/alt",
-        Method::POST,
-        middleware!(limit_api_calls),
-        move |req| {
-            //load in the model for usage.
-            let loaded_model = loaded_model.clone();
-            async move {
-                // take the request body, don't want to really copy it
-                let body = {
-                    let mut guard = req.lock().await;
-                    std::mem::take(&mut guard.body)
-                };
-
-                //tell the frontend that the request body was empty.
-                if body.is_empty() {
-                    return ErrorResolution::from_error(std::io::Error::new(std::io::ErrorKind::InvalidData, "Request body is empty"), Configured::Json).resolve();
-                }
-
-                let file_data = Cursor::new(body);
-
-                //send the file data and loaded model and create a streamed output from the image captioner.
-                let result = tokio::task::spawn_blocking(move || {
-                    TokenOutputResolution::stream(file_data, loaded_model).resolve()
-                })
-                .await
-                .map_err(|e| ErrorResolution::from_error(e, Configured::PlainText).resolve());
-
-                result.unwrap_or_else(|r| r)
-            }
-        },
-    )
-    .await;
-
-```
-
-In this POST example, the `/alt` route retrieves the body of the request and passes it to the `TokenOutputResolution::stream` function, which returns a custom implementation of the `Resolution` trait.
-
-## Resolution Trait Implementation
-
-```rust
-impl Resolution for TokenOutputResolution {
-    fn get_headers(&self) -> std::pin::Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>> {
-        Box::pin(async move { vec![get_status_header(200)] })
-    }
-
-    /// Provided raw image bytes, loads the model and tokenizer.
-    ///
-    /// If the generation of the alt text was successful it will return the prediction.
-    fn get_content(&self) -> std::pin::Pin<Box<dyn Stream<Item = Vec<u8>> + Send>> {
-        let loaded_model = self.loaded_model.clone();
-
-        let file_data = self.file_data.clone();
-
+        //stream the content chars.
         let content_stream = stream! {
 
-            let device = Device::Cpu;
+            let mut serve_chars = serve.chars();
 
-            let image = load_image_from_data(file_data)
-                .await
-                .unwrap()
-                .to_device(&device)
-                .unwrap();
-
-            let model = {
-                let guard = loaded_model.lock().await;
-                guard.model.clone()
-            };
-
-            let image_embeds = image.unsqueeze(0).unwrap().apply(model.vision_model()).unwrap();
-
-            let mut model = Model::Q(model);
-
-
-            let sep_token_id: u32 = 102;
-
-            let mut token_ids = vec![30522u32];
-            for index in 0..1000 {
-                let context_size = if index > 0 { 1 } else { token_ids.len() };
-                let start_pos = token_ids.len().saturating_sub(context_size);
-                let input_ids = Tensor::new(&token_ids[start_pos..], &device).unwrap().unsqueeze(0).unwrap();
-                let logits = model.text_decoder_forward(&input_ids, &image_embeds).unwrap();
-                let logits = logits.squeeze(0).unwrap();
-                let logits = logits.get(logits.dim(0).unwrap() - 1).unwrap();
-                let token = loaded_model.lock().await.logits_processor.sample(&logits).unwrap();
-
-                if token == sep_token_id {
-                    break;
-                }
-
-                token_ids.push(token);
-                if let Some(t) = loaded_model.lock().await.tokenizer.next_token(token).unwrap() {
-                    yield t.into_bytes();
-                }
-            }
-
-            if let Some(rest) = loaded_model.lock().await.tokenizer
-                .decode_rest()
-                .unwrap()
+            while let Some(sc) = serve_chars.next() 
             {
-                yield rest.into_bytes();
+                //yield and wait
+                yield format!("{sc}").into_bytes();
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
         };
 
         Box::pin(content_stream)
     }
 
+    //turn this into a box and do whatever else you need to do to resolve.
     fn resolve(self) -> Box<dyn Resolution + Send + 'static> {
         Box::new(self)
     }
 }
+
 ```
 
-In this example, we take the content of that image, pass into our image captioning model, then turn the token string into bytes and yields it back to the server.
+We can then use this just like every other resolution.
 
-Try out this example to generate alt text for your images using something like Postman, or accessing the homepage of the server and using the frontend implementation.
+`SlowString::new("Epic resolution test").resolve()` or if we wanted `SlowString::serve("Epic resolution test")`
+
+But you can use this to stream any type of content back to the client.
+
+## Creating Middleware
+
+Creating middleware is a bit different than creating a resolution. Mainly due to the fact we can intercept and interact with the request before meeting the resolution.
+
+Let's create two steps in our middleware, the first will print the user IP, then the second will block the request from resolving, just cause.
+
+```rust
+
+--snip``
+
+let step = middleware(|req| async move {
+
+    // the requesting IP from their socket.
+    let ip = {
+        let guard = req.lock().await;
+        guard.client_socket.ip().to_string()
+    };
+
+    println!("user requested from: {ip}");
+
+    //indicate it can move formward to step2 or whatever middleware is next.
+    Middleware::Next
+});
+
+//serve invalid middleware with a 400 request.
+//the request is stopped here and the middleware is served to the client.
+let step2 = middleware(|req| async move {
+    Middleware::InvalidEmpty(400)
+});
+
+let global = middleware(|req| async move {
+    println!("This is global middleware");
+    Middleware::Invalid(EmptyResolution::status(500).resolve()) //we can also serve middleware with a resolution object.
+});
+
+//now no request passes through and all see the 500 status.
+app.use_middleware(global); //DISABLE THIS LINE IF YOU WANT TO SEE THE OTHER MIDDLEWARE WORK
+
+//assume that we have created an app and are routing it
+app.add_or_panic("/api/create", Method::POST, middleware!(step, step2),
+|req| async move {
+    EmptyResolution::status(200).resolve()
+});
+
+```
+
+## Starting and Closing your App
+
+Once our app has been binded and routed with all of our routes and middleware, we can start the app!
+
+```rust
+
+--snip--
+
+//assume this function binds and routes.
+let mut app = route_app().await;
+
+let start_result: AppState = app.start()?; //has an error if the app could not start OR the app was already running
+
+loop {
+    let mut buffer = String::new();
+    let _ = std::io::stdin().read_line(&mut buffer);
+
+    break; //kill on enter
+}
+
+//stops the app gracefully, then awaits the thread to close.
+app.close().await?;
+
+Ok(())
+
+--snip--
+
+```
+
+## Examples
+
+If you are interested in use the library.
+
+I have created two grate examples that you can start with. 
+
+* [image analyzer](https://github.com/BIGDummyHead/async-web/tree/master/examples/image-analyzer), allows for the upload of images and automatically captions them.
+  * Covers serving files, serving content files for the index.html, creating/serving a custom resolution,  creating a limiting api call middleware.
+* [screen share](https://github.com/BIGDummyHead/share-screen), serves a screen sharing interface that allows us to view a Windows WebCam or Screen!
+  * Covers custom resolutions, app routing, and a CLI for screen sharing 
