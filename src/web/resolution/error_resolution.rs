@@ -88,6 +88,11 @@ impl std::fmt::Debug for Configured {
 pub struct ErrorResolution {
     error: Box<dyn std::error::Error + Send + 'static>,
     config: Configured,
+
+    /// The error code
+    /// 
+    /// Set to 500 initially, you can change this however.
+    pub code: i32
 }
 
 impl ErrorResolution {
@@ -141,6 +146,7 @@ impl ErrorResolution {
         Self {
             error: InnerError::new_box(error),
             config: config.into().unwrap_or(Configured::PlainText),
+            code: 500
         }
     }
 }
@@ -156,7 +162,7 @@ impl Resolution for ErrorResolution {
         let error_bytes = match &self.config {
             Configured::Json => {
                 let error = CaptureJsonErr {
-                    code: 500,
+                    code: self.code,
                     message: self.error.to_string(),
                 };
 

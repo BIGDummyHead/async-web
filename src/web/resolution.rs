@@ -6,6 +6,7 @@ pub mod empty_resolution;
 pub mod file_resolution;
 pub mod json_resolution;
 pub mod error_resolution;
+pub mod redirect;
 
 /// # Resolution
 /// 
