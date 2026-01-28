@@ -1,4 +1,7 @@
-use crate::web::{Resolution, resolution::{empty_content, get_status_header}};
+use crate::web::{
+    Resolution,
+    resolution::{empty_content, get_status_header},
+};
 
 pub type Location = &'static str;
 
@@ -10,7 +13,7 @@ pub enum RedirectType {
     /// The requested URL has more than one possible responses available.
     ///
     /// See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/300
-    /// 
+    ///
     /// # NOT YET IMPLEMENTED
     MultipleChoices, //TODO: This needs a specific struct to specify other locations. This may not even be implemented since it is 'rare' according to mozilla.
 
@@ -32,7 +35,7 @@ pub enum RedirectType {
     /// Indicates to the browser that the page has not been modified since a requested date.
     ///
     /// See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/304
-    /// 
+    ///
     /// Useful for caching items.
     ///
     /// You should use the header `If-Modified-Since` and check before sending this header.
@@ -73,7 +76,7 @@ impl RedirectType {
             RedirectType::MultipleChoices => todo!(),
 
             //the rest of the current implement the Location: header.
-            _ => 1
+            _ => 1,
         }
     }
 }
@@ -85,7 +88,9 @@ pub struct Redirect {
 impl Redirect {
     /// Create a new redirect resolution with a redirect type.
     pub fn new(redirect_type: RedirectType) -> Self {
-        Self { redirect_header_type: redirect_type }
+        Self {
+            redirect_header_type: redirect_type,
+        }
     }
 }
 
@@ -94,18 +99,14 @@ fn location_header(url: Location) -> String {
     format!("Location: {url}")
 }
 
-
 impl Resolution for Redirect {
-
     //sets the header for the redirection!
-    fn get_headers(&self) -> std::pin::Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>> {
-
+    fn get_headers(&self) -> Vec<String> {
         let mut headers = Vec::with_capacity(1 + self.redirect_header_type.size());
         headers.push(get_status_header(self.redirect_header_type.status()));
 
         //subject to change
         let redir_headers: Option<String> = match self.redirect_header_type {
-
             //just use the location header.
             RedirectType::MovedPermanently(url) => Some(location_header(url)),
             RedirectType::Found(url) => Some(location_header(url)),
@@ -116,7 +117,6 @@ impl Resolution for Redirect {
             //TODO: Implement the multiple choices.
             RedirectType::MultipleChoices => todo!(),
 
-
             RedirectType::NotModified => None,
         };
 
@@ -125,9 +125,7 @@ impl Resolution for Redirect {
             headers.push(redir_headers);
         }
 
-        Box::pin(async move {
-            headers
-        })
+        headers
     }
 
     fn get_content(&self) -> std::pin::Pin<Box<dyn futures::Stream<Item = Vec<u8>> + Send>> {

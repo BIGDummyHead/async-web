@@ -644,7 +644,7 @@ async fn resolve(
     resolved: Box<dyn Resolution + Send>,
 ) -> Result<(), std::io::Error> {
     // ! collect all headers and join them
-    let mut headers = resolved.get_headers().await.join("\r\n");
+    let mut headers = resolved.get_headers().join("\r\n");
 
     // ? write any additional headers from the request.
     {

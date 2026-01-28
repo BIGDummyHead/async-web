@@ -17,7 +17,7 @@ pub trait Resolution: Send + 'static {
     /// 
     /// Return a collection of headers to serve to the client.
     ///
-    fn get_headers(&self) -> Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>>;
+    fn get_headers(&self) -> Vec<String>;
 
     /// # Get Content
     /// 

@@ -153,8 +153,8 @@ impl ErrorResolution {
 
 impl Resolution for ErrorResolution {
     //outputs 500 header
-    fn get_headers(&self) -> std::pin::Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>> {
-        Box::pin(async move { vec![get_status_header(500)] })
+    fn get_headers(&self) ->Vec<String> {
+         vec![get_status_header(self.code)]
     }
 
     /// returns an outputted content

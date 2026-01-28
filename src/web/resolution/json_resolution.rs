@@ -38,28 +38,27 @@ pub struct JsonResolution {
 }
 
 impl JsonResolution {
-
     /// # serialize
-    /// 
+    ///
     /// Serializes the value T into a JsonResolution, or if the result fails a ErrorResolution is passed back in JSON format.
-    /// 
+    ///
     /// For example inside of a route.
-    /// 
+    ///
     /// ```
-    /// 
+    ///
     /// let r = route!(req, {
     ///     
     ///     //assume that person derives [serialize] from serde::json
     ///     let person = Person::new("Test", 20);
-    /// 
+    ///
     ///     let json: Result<JsonResolution, ErrorResolution> = JsonResolution::serialize(person);
-    /// 
+    ///
     ///     
-    /// 
+    ///
     /// });
     ///     
-    /// 
-    /// 
+    ///
+    ///
     /// ```
     pub fn serialize<T>(value: T) -> Result<Self, ErrorResolution>
     where
@@ -70,12 +69,7 @@ impl JsonResolution {
                 json_value: json,
                 status_code: 200,
             })
-            .map_err(|e| {
-                ErrorResolution::from_error(
-                    e,
-                    super::error_resolution::Configured::Json,
-                )
-            })
+            .map_err(|e| ErrorResolution::from_error(e, super::error_resolution::Configured::Json))
     }
 
     /// Set the status code of the resolution.
@@ -89,20 +83,16 @@ impl JsonResolution {
     }
 }
 
-
 impl Resolution for JsonResolution {
-    
     fn resolve(self) -> Box<dyn Resolution + Send + 'static> {
         Box::new(self)
     }
-    
-    fn get_headers(&self) -> Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>> {
-        Box::pin(async move {
-            vec![
-                get_status_header(self.status_code),
-                "Content-Type: application/json".to_string(),
-            ]
-        })
+
+    fn get_headers(&self) -> Vec<String> {
+        vec![
+            get_status_header(self.status_code),
+            "Content-Type: application/json".to_string(),
+        ]
     }
 
     fn get_content(&self) -> Pin<Box<dyn Stream<Item = Vec<u8>> + Send + 'static>> {
@@ -111,5 +101,3 @@ impl Resolution for JsonResolution {
         Box::pin(stream::once(async move { json_value.into_bytes() }))
     }
 }
-
-

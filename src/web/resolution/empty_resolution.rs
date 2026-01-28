@@ -22,8 +22,8 @@ impl EmptyResolution {
 }
 
 impl Resolution for EmptyResolution {
-    fn get_headers(&self) -> std::pin::Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>> {
-        Box::pin(async move { vec![get_status_header(self.status_code)] })
+    fn get_headers(&self) -> Vec<String> {
+        vec![get_status_header(self.status_code)]
     }
 
     fn get_content(&self) -> std::pin::Pin<Box<dyn Stream<Item = Vec<u8>> + Send>> {
