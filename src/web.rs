@@ -9,7 +9,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use tokio::sync::Mutex;
 
-use crate::web::{resolution::{empty_resolution::EmptyResolution, error_resolution::{Configured, ErrorResolution}, file_resolution::FileResolution, json_resolution::JsonResolution}, routing::middleware::MiddlewareClosure};
+use crate::web::{resolution::{empty_resolution::EmptyResolution, error_resolution::{Configured, ErrorResolution}, file_resolution::FileResolution, json_resolution::JsonResolution, redirect::{Redirect, RedirectType}}, routing::middleware::MiddlewareClosure};
 
 pub use self::{
     app::App, resolution::Resolution, routing::method::Method, routing::middleware::Middleware,
@@ -248,4 +248,11 @@ pub fn resolve(to_resolve: impl Resolution) -> Resolved {
 /// Short for `FileResolution::new(file).resolve()`
 pub fn file(file: &str) -> Resolved {
     FileResolution::new(file).resolve()
+}
+
+/// # Redirect
+/// 
+/// Short for `Redirect::new(RedirectType::SomeRedir).resolve()`
+pub fn redirect(redir_type: RedirectType) -> Resolved {
+    Redirect::new(redir_type).resolve()
 }

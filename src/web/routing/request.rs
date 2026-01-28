@@ -42,6 +42,8 @@ pub struct Request {
 
     /// The connected socket of the client
     pub client_socket: SocketAddr,
+
+    additional_headers: HashMap<String, String>
 }
 
 impl Request {
@@ -150,6 +152,27 @@ impl Request {
             body,
             variables: HashMap::new(),
             client_socket,
+            additional_headers: HashMap::new()
         })
+    }
+
+
+    /// # add header
+    /// 
+    /// Adds the header to the additional headers map.
+    /// 
+    /// `Note: If the value already exist, the previous is returned as Some(previous_value)`
+    /// 
+    /// This is useful for middleware, if in a middleware resolution you need to add some header that may do caching.
+    pub fn add_header(&mut self, header_name: String, header_value: String) -> Option<String> {
+        self.additional_headers.insert(header_name, header_value)
+    
+    }
+
+    /// # get additional headers
+    /// 
+    /// Gets the additional headers that were emplaced by add_header
+    pub fn get_additional_headers(&self) -> &HashMap<String, String> {
+        &self.additional_headers
     }
 }

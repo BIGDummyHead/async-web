@@ -1,5 +1,7 @@
 use crate::web::{Resolution, resolution::{empty_content, get_status_header}};
 
+pub type Location = &'static str;
+
 /// Redirect Types
 ///
 /// Redirect types that you can use to set the header of your redirect.\
@@ -8,26 +10,30 @@ pub enum RedirectType {
     /// The requested URL has more than one possible responses available.
     ///
     /// See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/300
+    /// 
+    /// # NOT YET IMPLEMENTED
     MultipleChoices, //TODO: This needs a specific struct to specify other locations. This may not even be implemented since it is 'rare' according to mozilla.
 
     /// The resource has been moved permanently.
     ///
     /// See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/301
-    MovedPermanently(&'static str),
+    MovedPermanently(Location),
 
     /// The requested URL has been moved temporarliy.
     ///
     /// See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/302
-    Found(&'static str),
+    Found(Location),
 
     /// Indicates that the browser should redirect to the url in the location header.
     ///
     /// See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/303
-    SeeOther(&'static str),
+    SeeOther(Location),
 
     /// Indicates to the browser that the page has not been modified since a requested date.
     ///
     /// See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/304
+    /// 
+    /// Useful for caching items.
     ///
     /// You should use the header `If-Modified-Since` and check before sending this header.
     NotModified,
@@ -35,12 +41,12 @@ pub enum RedirectType {
     /// The requested URL has been temporarliy moved
     ///
     /// See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/307
-    TemporaryRedirect(&'static str),
+    TemporaryRedirect(Location),
 
     /// The requested URL has been permanently moved.
     ///
     /// See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/308
-    PermanentRedirect(&'static str),
+    PermanentRedirect(Location),
 }
 
 impl RedirectType {
@@ -73,11 +79,18 @@ impl RedirectType {
 }
 
 pub struct Redirect {
-    pub redirect_header_type: RedirectType,
+    redirect_header_type: RedirectType,
 }
 
-//common header maker.
-fn location_header(url: &'static str) -> String {
+impl Redirect {
+    /// Create a new redirect resolution with a redirect type.
+    pub fn new(redirect_type: RedirectType) -> Self {
+        Self { redirect_header_type: redirect_type }
+    }
+}
+
+//formats the url into a Location: Url header.
+fn location_header(url: Location) -> String {
     format!("Location: {url}")
 }
 

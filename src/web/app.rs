@@ -617,7 +617,8 @@ async fn handle_client_request(
     let resolved =
         middleware_failed_resolution.unwrap_or((endpoint.resolution)(request.clone()).await);
 
-    resolve(resolved, &mut stream).await?;
+    //finally resolve this and send the request
+    resolve(&mut stream, request, resolved).await?;
 
     Ok(())
 }
@@ -629,18 +630,35 @@ async fn handle_client_request(
 /// The function does the following:
 ///
 /// i. push the transfer encoding header
+///
 /// ii. write all headers required to the stream
+///
 /// iii. retrieves the content stream
+///
 /// iv. loops over the content stream chunk by chunk, writing to the client
-/// v. writes the
-
+///
+/// v. writes the termination of the stream when stream ends
 async fn resolve(
-    resolved: Box<dyn Resolution + Send>,
     stream: &mut TcpStream,
-) -> Result<(), Box<dyn std::error::Error>> {
-    //write the headers to the stream
+    request: Arc<Mutex<Request>>,
+    resolved: Box<dyn Resolution + Send>,
+) -> Result<(), std::io::Error> {
+    // ! collect all headers and join them
     let mut headers = resolved.get_headers().await.join("\r\n");
+
+    // ? write any additional headers from the request.
+    {
+        let guard = request.lock().await;
+
+        for (k, v) in guard.get_additional_headers() {
+            headers.push_str(&format!("{k}: {v}\r\n"));
+        }
+    }; // ! drops the guard not, very important since this was resolved.
+
+    // ? tell the client this is streamed
     headers.push_str("\r\nTransfer-Encoding: chunked\r\n\r\n");
+
+    // ! write the headers to the stream.
     stream.write_all(headers.as_bytes()).await?;
 
     let mut content_stream = resolved.get_content();
