@@ -9,7 +9,16 @@ use std::sync::Arc;
 use serde::Serialize;
 use tokio::sync::Mutex;
 
-use crate::web::{resolution::{empty_resolution::EmptyResolution, error_resolution::{Configured, ErrorResolution}, file_resolution::FileResolution, json_resolution::JsonResolution, redirect::{Redirect, RedirectType}}, routing::middleware::MiddlewareClosure};
+use crate::web::{
+    resolution::{
+        empty_resolution::EmptyResolution,
+        error_resolution::{Configured, ErrorResolution},
+        file_resolution::FileResolution,
+        json_resolution::JsonResolution,
+        redirect::{Redirect, RedirectType},
+    },
+    routing::middleware::MiddlewareClosure,
+};
 
 pub use self::{
     app::App, resolution::Resolution, routing::method::Method, routing::middleware::Middleware,
@@ -176,35 +185,31 @@ where
 
 pub type Resolved = Box<dyn Resolution + Send + 'static>;
 
-
-
 /// # Status
-/// 
-/// Short for `EmptyResolution::status(code).resolve()`
-pub fn status(code: i32) -> Resolved {
-    EmptyResolution::status(code).resolve()
+///
+/// Short for `EmptyResolution::status(code)`
+pub fn status(code: i32) -> impl Resolution {
+    EmptyResolution::status(code)
 }
 
 /// # Serialized
-/// 
-/// Short for: 
-/// 
+///
+/// Short for:
+///
 /// ```
 /// JsonResolution::serialize(value)
-/// .map(|j| j.resolve())
-/// .unwrap_or_else(|r| r.resolve())
 /// ```
-pub fn serialized<V>(value: V) -> Resolved 
-where V : Serialize {
+pub fn serialized<V>(value: V) -> Result<JsonResolution, ErrorResolution>
+where
+    V: Serialize,
+{
     JsonResolution::serialize(value)
-    .map(|j| j.resolve())
-    .unwrap_or_else(|r| r.resolve())
 }
 
 /// # Error
-/// 
-/// Short for `ErrorResolution::from_error(error, configured).resolve()` 
-/// 
+///
+/// Short for `ErrorResolution::from_error(error, configured)`
+///
 /// Note: Code is 500 by default, see `error_status`
 pub fn error<E, C>(error: E, configured: C) -> ErrorResolution
 where
@@ -215,44 +220,44 @@ where
 }
 
 /// # Error Status
-/// 
+///
 /// Short for:
-/// 
+///
 /// ```
 /// let mut err = ErrorResolution::from_error(error, configured);
-/// 
+///
 /// err.code = code;
-/// 
-/// err.resolve()
+///
+/// err
 /// ```
-pub fn error_status<E, C>(err: E, configured: C, code: i32) -> Resolved
-where 
-E : std::error::Error + 'static,
-C: Into<Option<Configured>> {
+pub fn error_status<E, C>(err: E, configured: C, code: i32) -> impl Resolution
+where
+    E: std::error::Error + 'static,
+    C: Into<Option<Configured>>,
+{
     let mut res = error(err, configured);
     res.code = code;
 
-    res.resolve()
+    res
 }
 
 /// # Resolve
-/// 
+///
 /// Short for `resolution.resolve()`
 pub fn resolve(to_resolve: impl Resolution) -> Resolved {
     to_resolve.resolve()
 }
 
-
 /// # File
-/// 
-/// Short for `FileResolution::new(file).resolve()`
-pub fn file(file: &str) -> Resolved {
-    FileResolution::new(file).resolve()
+///
+/// Short for `FileResolution::new(file)`
+pub fn file(file: &str) -> impl Resolution {
+    FileResolution::new(file)
 }
 
 /// # Redirect
-/// 
-/// Short for `Redirect::new(RedirectType::SomeRedir).resolve()`
-pub fn redirect(redir_type: RedirectType) -> Resolved {
-    Redirect::new(redir_type).resolve()
+///
+/// Short for `Redirect::new(RedirectType::SomeRedir)`
+pub fn redirect(redir_type: RedirectType) -> impl Resolution {
+    Redirect::new(redir_type)
 }

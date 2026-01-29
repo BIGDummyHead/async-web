@@ -15,3 +15,4 @@ async-stream = "0.3.6"
 
 serde_json = "1.0"
 serde = { version = "1.0.228", features = ["derive"] }
+linked-hash-map = "0.5.6"

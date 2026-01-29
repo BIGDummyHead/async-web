@@ -11,7 +11,11 @@ mod tests {
     use crate::{
         resolve,
         web::{
-            App, EndPoint, Method, Resolution, resolution::empty_resolution::EmptyResolution,
+            App, EndPoint, Method, Resolution,
+            resolution::{
+                empty_resolution::EmptyResolution, file_resolution::FileResolution,
+                json_resolution::JsonResolution, merged_resolution::and,
+            },
             routing::router::route_tree::RouteTree,
         },
     };
@@ -89,13 +93,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_routing_app() {
-
         let closure_guard = APP_CLOSURE_SAFETY.lock().await;
 
         let app = App::bind("127.0.0.1:80").await.expect("app did not bind");
 
         app.add_or_panic("/app", Method::GET, None, |_req| async move {
             EmptyResolution::status(200).resolve()
+        })
+        .await;
+
+        drop(closure_guard);
+    }
+
+    #[tokio::test]
+    async fn test_and() {
+        let closure_guard = APP_CLOSURE_SAFETY.lock().await;
+
+        let app = App::bind("127.0.0.1:80").await.expect("app did not bind");
+
+        app.add_or_panic("/test", Method::GET, None, |_req| async move {
+            let left_left = FileResolution::new("test.asd");
+            let left = FileResolution::new("index.html");
+            let right = JsonResolution::serialize({}).unwrap();
+            and(left_left, and(left, right)).resolve()
         })
         .await;
 

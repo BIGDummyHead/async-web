@@ -1,3 +1,5 @@
+use linked_hash_map::LinkedHashMap;
+
 use crate::web::{
     Resolution,
     resolution::{empty_content, get_status_header},
@@ -95,18 +97,22 @@ impl Redirect {
 }
 
 //formats the url into a Location: Url header.
-fn location_header(url: Location) -> String {
-    format!("Location: {url}")
+fn location_header(url: Location) -> (String, String) {
+    ("Location".to_string(), url.to_string())
 }
 
 impl Resolution for Redirect {
     //sets the header for the redirection!
-    fn get_headers(&self) -> Vec<String> {
-        let mut headers = Vec::with_capacity(1 + self.redirect_header_type.size());
-        headers.push(get_status_header(self.redirect_header_type.status()));
+    fn get_headers(&self) -> LinkedHashMap<String, Option<String>> {
+        let mut hmap = LinkedHashMap::<String, Option<String>>::with_capacity(
+            1 + self.redirect_header_type.size(),
+        );
+
+        let (n, v) = get_status_header(self.redirect_header_type.status());
+        hmap.insert(n, Some(v));
 
         //subject to change
-        let redir_headers: Option<String> = match self.redirect_header_type {
+        let redir_headers: Option<(String, String)> = match self.redirect_header_type {
             //just use the location header.
             RedirectType::MovedPermanently(url) => Some(location_header(url)),
             RedirectType::Found(url) => Some(location_header(url)),
@@ -116,16 +122,15 @@ impl Resolution for Redirect {
 
             //TODO: Implement the multiple choices.
             RedirectType::MultipleChoices => todo!(),
-
             RedirectType::NotModified => None,
         };
 
         //push the redirection header.
-        if let Some(redir_headers) = redir_headers {
-            headers.push(redir_headers);
+        if let Some((n, v)) = redir_headers {
+            hmap.insert(n, Some(v));
         }
 
-        headers
+        hmap
     }
 
     fn get_content(&self) -> std::pin::Pin<Box<dyn futures::Stream<Item = Vec<u8>> + Send>> {

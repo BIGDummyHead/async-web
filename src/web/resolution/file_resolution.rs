@@ -1,6 +1,7 @@
 use futures::Stream;
+use linked_hash_map::LinkedHashMap;
 
-use crate::web::{Resolution, resolution::get_status_header, streams::stream_file};
+use crate::{ web::{Resolution, resolution::get_status_header, streams::stream_file}};
 
 /// # File Resolution
 ///
@@ -120,11 +121,16 @@ impl Resolution for FileResolution {
     /// # get headers
     ///
     /// For this implementation the headers are the status of the file 200/404 and the file type header, see the get_file_type_header function
-    fn get_headers(&self) -> Vec<String> {
-        vec![
-            get_status_header(self.get_status()),
-            self.get_file_type_header(),
-        ]
+    fn get_headers(&self) -> LinkedHashMap<String, Option<String>> {
+        let mut hmap = LinkedHashMap::new();
+
+        let header = get_status_header(self.get_status());
+        let file_type_header = self.get_file_type_header();
+
+        hmap.insert(header.0, Some(header.1));
+        hmap.insert("Content-Type".to_string(), Some(file_type_header));
+
+        hmap
     }
 
     /// # get content

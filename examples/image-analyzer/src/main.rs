@@ -1,17 +1,13 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_web::middleware;
 use async_web::web::errors::AppState;
-use async_web::web::resolution::empty_resolution::EmptyResolution;
 use async_web::web::resolution::error_resolution::{Configured, ErrorResolution};
-use async_web::web::resolution::file_resolution::FileResolution;
-use async_web::web::{App, Method, Middleware, Request, Resolution, middleware};
+use async_web::web::{App, Method, Middleware, Request, Resolution, file, middleware, status};
 use local_ip_address::local_ip;
 use tokio::sync::{Mutex, MutexGuard};
-use tokio::time::sleep;
 
 pub mod api_call;
 pub mod loaded_model;
@@ -157,21 +153,28 @@ async fn route_app() -> App {
 
     //homepage
     app.add_or_change_route("/", Method::GET, None, |_req| async move {
-        FileResolution::new("public/index.html").resolve()
+        file("public/index.html").resolve()
     })
     .await
     .expect("could not change home page.");
 
     //get content files.
     app.add_or_panic("/{file}", Method::GET, None, |req| async move {
-        let file_name = match req.lock().await.variables.get("file") {
-            None => return EmptyResolution::status(404).resolve(),
-            Some(v) => v.to_string(),
-        };
+        
+        //get guard, and get the file name
+        let r_guard = req.lock().await;
+        let file_name = r_guard.variables.get("file").unwrap();
 
-        FileResolution::new(&format!("public/{file_name}")).resolve()
+        //return the file requested
+        file(&format!("public/{file_name}")).resolve()
     })
     .await;
+
+    app.add_or_panic("/test/test", Method::POST, None, |_req| async move {
+
+        status(200).resolve()
+
+    }).await;
 
     app
 }

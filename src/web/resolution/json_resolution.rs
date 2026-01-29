@@ -1,12 +1,15 @@
 use std::pin::Pin;
 
 use futures::{Stream, stream};
+use linked_hash_map::LinkedHashMap;
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::web::{
-    Resolution,
-    resolution::{error_resolution::ErrorResolution, get_status_header},
+use crate::{
+    web::{
+        Resolution,
+        resolution::{error_resolution::ErrorResolution, get_status_header},
+    },
 };
 
 /// ## JSON Resolution
@@ -88,11 +91,18 @@ impl Resolution for JsonResolution {
         Box::new(self)
     }
 
-    fn get_headers(&self) -> Vec<String> {
-        vec![
-            get_status_header(self.status_code),
-            "Content-Type: application/json".to_string(),
-        ]
+    fn get_headers(&self) -> LinkedHashMap<String, Option<String>> {
+        let mut hmap = LinkedHashMap::new();
+
+        let header = get_status_header(self.status_code);
+
+        hmap.insert(header.0, Some(header.1));
+        hmap.insert(
+            "Content-Type".to_string(),
+            Some("application/json".to_string()),
+        );
+
+        hmap
     }
 
     fn get_content(&self) -> Pin<Box<dyn Stream<Item = Vec<u8>> + Send + 'static>> {

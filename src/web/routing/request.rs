@@ -1,16 +1,17 @@
 use std::{collections::HashMap, net::SocketAddr};
 
+use linked_hash_map::LinkedHashMap;
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     net::TcpStream,
 };
 
-use crate::web::{Method, Route};
+use crate::{web::{Method, Route}};
 
 /// # Request
-/// 
+///
 /// Represents a singular request that has been made by a TcpStream.
-/// 
+///
 /// Data includes the method, the route, headers, variables, and the body of the request.
 pub struct Request {
     /// The method used for this request.
@@ -20,7 +21,7 @@ pub struct Request {
     pub route: Route,
 
     /// # headers
-    /// 
+    ///
     /// The headers that are included in the request, such as the content length, and other misc header items
     pub headers: HashMap<String, String>,
 
@@ -36,23 +37,23 @@ pub struct Request {
     pub variables: HashMap<String, String>,
 
     /// The body of the request.
-    /// 
+    ///
     /// None if there was no body included in the request.
     pub body: Option<Vec<u8>>,
 
     /// The connected socket of the client
     pub client_socket: SocketAddr,
 
-    additional_headers: HashMap<String, String>
+    additional_headers: Option<LinkedHashMap<String, Option<String>>>,
 }
 
 impl Request {
     /// # from_stream
-    /// 
+    ///
     /// Takes a mutable reference to the TcpStream (client), reading each line of the stream.
-    /// 
+    ///
     /// Each line is individually parsed to create a Request.
-    /// 
+    ///
     /// The client's socket is stored in the Request.
     pub async fn from_stream(
         stream: &mut TcpStream,
@@ -134,12 +135,10 @@ impl Request {
             .unwrap_or(0);
 
         let body = if content_length > 0 {
-            
             //read the body from the content length.
             let mut body = vec![0u8; content_length];
             reader.read_exact(&mut body).await?;
             Some(body)
-
         } else {
             //no body was provided.
             None
@@ -152,27 +151,55 @@ impl Request {
             body,
             variables: HashMap::new(),
             client_socket,
-            additional_headers: HashMap::new()
+            additional_headers: Some(LinkedHashMap::new()),
         })
     }
 
-
     /// # add header
-    /// 
+    ///
     /// Adds the header to the additional headers map.
-    /// 
+    ///
     /// `Note: If the value already exist, the previous is returned as Some(previous_value)`
-    /// 
+    ///
     /// This is useful for middleware, if in a middleware resolution you need to add some header that may do caching.
-    pub fn add_header(&mut self, header_name: String, header_value: String) -> Option<String> {
-        self.additional_headers.insert(header_name, header_value)
-    
+    pub fn add_header(
+        &mut self,
+        header_name: String,
+        header_value: Option<String>,
+    )  {
+        if let Some(m) = self.additional_headers.as_mut() {
+            m.insert(header_name, header_value);
+        }
     }
 
-    /// # get additional headers
+    /// # get header
     /// 
-    /// Gets the additional headers that were emplaced by add_header
-    pub fn get_additional_headers(&self) -> &HashMap<String, String> {
-        &self.additional_headers
+    /// Retrieves a header by the header_name.
+    /// 
+    /// If the header exist, a reference to the &Option<String> is returned.
+    /// 
+    /// `Note: Sometimes, a header may have a name, but no value.`
+    /// 
+    /// If the header does not exist, None is returned.
+    pub fn get_header(&self, header_name: &str) -> Option<&String> {
+        self.additional_headers
+            .as_ref()
+            .and_then(|m| m.get(&header_name.to_string()))
+            .and_then(|v| v.as_ref())
+    }
+
+    /// # take headers
+    /// 
+    /// This function will take the value out of the request.
+    /// 
+    /// If the function returns None, it has already been taken.
+    /// 
+    /// If the function returns Some(HeadMap), you now have control.
+    pub fn take_headers(&mut self) -> Option<LinkedHashMap<String, Option<String>>> {
+        if let None = self.additional_headers {
+            return None;
+        }
+
+        self.additional_headers.take()
     }
 }

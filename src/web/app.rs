@@ -643,23 +643,65 @@ async fn resolve(
     request: Arc<Mutex<Request>>,
     resolved: Box<dyn Resolution + Send>,
 ) -> Result<(), std::io::Error> {
-    // ! collect all headers and join them
-    let mut headers = resolved.get_headers().join("\r\n");
+    //maps the header from a k,v to a String
 
-    // ? write any additional headers from the request.
-    {
-        let guard = request.lock().await;
+    // collect all of our headers from the resolution and the middleware
+    let headers = resolved.get_headers();
 
-        for (k, v) in guard.get_additional_headers() {
-            headers.push_str(&format!("{k}: {v}\r\n"));
-        }
-    }; // ! drops the guard not, very important since this was resolved.
+    let mut req_guard = request.lock().await;
+
+    let mut response_headers = req_guard.take_headers().ok_or(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "the headers were already taken",
+    ))?;
+
+    // ! no need for the request guard.
+    drop(req_guard);
+
+    //insert our headers from the resolution onto our
+    for (key, val) in headers {
+        response_headers.insert(key, val);
+    }
+
+    let first_rep_key = "HTTP/1.1";
+    let status = response_headers
+        .remove(first_rep_key)
+        .map(|s| s.expect("you must include a status"))
+        .unwrap_or_else(|| "200 OK".to_string());
+
+    //the header string to convert to bytes
+    let mut header_str = String::new();
+
+    let status_header = format!("{first_rep_key} {status}\r\n");
+    header_str.push_str(&status_header);
+
+    //Fn to format the headers into a single string
+    let format_headers = |(key, val): (String, Option<String>)| {
+        let value = match val {
+            None => "".to_string(),
+            Some(v) => format!(":{v}"),
+        };
+
+        format!("{key}{value}")
+    };
+
+    //pushes the formatted header into the header_str
+    let push_to_str = |s: String| {
+        header_str.push_str(&s);
+        header_str.push_str("\r\n");
+    };
+
+    //converts all the headers into a single string.
+    response_headers
+        .into_iter()
+        .map(format_headers) // map these items to an appropriate format.
+        .for_each(push_to_str); //foreach string push onto the string.
 
     // ? tell the client this is streamed
-    headers.push_str("\r\nTransfer-Encoding: chunked\r\n\r\n");
+    header_str.push_str("Transfer-Encoding: chunked\r\n\r\n");
 
     // ! write the headers to the stream.
-    stream.write_all(headers.as_bytes()).await?;
+    stream.write_all(header_str.as_bytes()).await?;
 
     let mut content_stream = resolved.get_content();
 

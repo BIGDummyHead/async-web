@@ -1,9 +1,10 @@
 use futures::{Stream, stream};
+use linked_hash_map::LinkedHashMap;
 
-use crate::web::{
+use crate::{ web::{
     Resolution,
     resolution::{empty_content, get_status_header},
-};
+}};
 
 /// ## Empty Resolution
 ///
@@ -22,8 +23,14 @@ impl EmptyResolution {
 }
 
 impl Resolution for EmptyResolution {
-    fn get_headers(&self) -> Vec<String> {
-        vec![get_status_header(self.status_code)]
+    fn get_headers(&self) -> LinkedHashMap<String, Option<String>> {
+        let mut hmap = LinkedHashMap::new();
+
+        let header = get_status_header(self.status_code);
+
+        hmap.insert(header.0, Some(header.1));
+
+        hmap
     }
 
     fn get_content(&self) -> std::pin::Pin<Box<dyn Stream<Item = Vec<u8>> + Send>> {

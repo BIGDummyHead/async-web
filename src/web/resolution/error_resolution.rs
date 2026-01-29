@@ -1,9 +1,10 @@
-use std::{fmt::Debug, panic};
+use std::{ fmt::Debug, panic};
 
 use futures::stream;
+use linked_hash_map::LinkedHashMap;
 use serde::Serialize;
 
-use crate::web::{Resolution, resolution::get_status_header};
+use crate::{web::{Resolution, resolution::get_status_header}};
 
 /// Idiomatic type alias for converting an Error to a string.
 pub type ErrorFormatter = dyn Fn(&Box<dyn std::error::Error + Send>) -> String + Send;
@@ -153,8 +154,14 @@ impl ErrorResolution {
 
 impl Resolution for ErrorResolution {
     //outputs 500 header
-    fn get_headers(&self) ->Vec<String> {
-         vec![get_status_header(self.code)]
+    fn get_headers(&self) -> LinkedHashMap<String, Option<String>> {
+        let mut hmap = LinkedHashMap::new();
+
+        let header = get_status_header(self.code);
+
+        hmap.insert(header.0, Some(header.1));
+
+        hmap
     }
 
     /// returns an outputted content

@@ -1,18 +1,19 @@
+use crate::loaded_model::LoadedModel;
+use crate::model::{Model, load_image_from_data};
 use async_stream::stream;
 use async_web::web::Resolution;
 use async_web::web::resolution::get_status_header;
 use candle_core::{Device, Tensor};
-use std::{future::Future, sync::Arc};
+use linked_hash_map::LinkedHashMap;
+use std::io::Cursor;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_stream::Stream;
-use std::io::Cursor;
-use crate::model::{Model, load_image_from_data};
-use crate::loaded_model::LoadedModel;
 
 /// Token Output Resolution
-/// 
+///
 /// Serves as a way to take Image data and convert to a stream of tokens that can be served to the user to caption the image.
-/// 
+///
 /// Implements the `Resolution` trait from async_web.
 pub struct TokenOutputResolution {
     file_data: Cursor<Vec<u8>>,
@@ -29,8 +30,13 @@ impl TokenOutputResolution {
 }
 
 impl Resolution for TokenOutputResolution {
-    fn get_headers(&self) -> std::pin::Pin<Box<dyn Future<Output = Vec<String>> + Send + '_>> {
-        Box::pin(async move { vec![get_status_header(200)] })
+    fn get_headers(&self) -> LinkedHashMap<String, Option<String>> {
+        let mut hmap = LinkedHashMap::new();
+
+        let (k, v ) = get_status_header(200);
+        hmap.insert(k, Some(v));
+
+        hmap
     }
 
     /// Provided raw image bytes, loads the model and tokenizer.
